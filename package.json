@@ -1,0 +1,12 @@
+{
+  "name": "catio",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@10.13.1",
+  "scripts": {
+    "dev": "pnpm --filter @catio/desktop tauri dev",
+    "build": "pnpm --filter @catio/desktop tauri build",
+    "test": "pnpm --filter @catio/core test",
+    "typecheck": "pnpm --filter @catio/desktop typecheck"
+  }
+}

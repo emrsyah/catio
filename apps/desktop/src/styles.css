@@ -1,0 +1,228 @@
+/* Tokens from the V5 design (after the contrast pass). */
+:root {
+  --bg: #fbfaf8;
+  --ink: #1f1e1c;
+  --ink-2: #77736d; /* meaningful secondary text, 4.5:1 */
+  --ink-3: #8e8a83; /* done / inactive only */
+  --line: #ece9e4;
+  --box: #8e8a83; /* control stroke, 3:1 */
+  --hover: #f2f0ec;
+  --accent: #e2552d; /* bars, rings, non-text */
+  --accent-text: #b5441f; /* small orange text, 4.5:1 */
+  --accent-soft: #e2552d1f;
+  --selection: #e2552d29;
+  --fs: 14px;
+  --gutter: 44px;
+  color-scheme: light dark;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #1e1d1b;
+    --ink: #eceae6;
+    --ink-2: #9a968f;
+    --ink-3: #7a766f;
+    --line: #2e2c29;
+    --box: #7a766f;
+    --hover: #2a2926;
+    --accent: #f0693f;
+    --accent-text: #f0693f;
+    --accent-soft: #f0693f26;
+    --selection: #f0693f33;
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  height: 100%;
+  background: var(--bg);
+  color: var(--ink);
+  font-family: "Geist Variable", "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  overflow: hidden;
+}
+
+body {
+  display: flex;
+  flex-direction: column;
+}
+
+/* Drag strip: the only chrome. 18px so the 11px status label fits. */
+.strip {
+  flex: none;
+  height: 18px;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  padding: 0 12px;
+  cursor: default;
+  user-select: none;
+}
+
+.status {
+  font-size: 11px;
+  color: var(--ink-2);
+  pointer-events: none;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.status[data-tone="accent"] {
+  color: var(--accent-text);
+}
+
+#editor {
+  flex: 1;
+  min-height: 0;
+
+/* ---------- CodeMirror ----------
+   Nested under #editor: the id outranks CodeMirror's injected base theme (.ͼ1 .cm-line etc.). */
+
+.cm-editor {
+  height: 100%;
+  font-size: var(--fs);
+  background: transparent;
+}
+.cm-editor.cm-focused {
+  outline: none;
+}
+.cm-scroller {
+  font-family: inherit;
+  line-height: 1.6;
+  padding-bottom: 24px;
+  scrollbar-width: thin;
+  scrollbar-color: var(--line) transparent;
+}
+.cm-content {
+  padding: 0 0 8px;
+  caret-color: var(--accent);
+}
+.cm-line {
+  padding: 0 16px 0 var(--gutter);
+}
+.cm-cursor {
+  border-left: 2px solid var(--accent);
+}
+.cm-selectionBackground,
+.cm-focused > .cm-scroller > .cm-selectionLayer .cm-selectionBackground {
+  background: var(--selection) !important;
+}
+.cm-activeLine {
+  background-color: transparent;
+}
+.cm-placeholder {
+  color: var(--ink-2);
+}
+
+/* Focus zone: one step bigger and a touch heavier than notes. */
+.cm-focusline {
+  font-size: calc(var(--fs) + 1px);
+  font-weight: 500;
+}
+
+/* Orange "now" bar on the first open focus to-do. */
+.cm-now {
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+
+/* The divider reads as a rule; the dashes reappear when the caret is on it. */
+.cm-divider {
+  color: transparent;
+  background: linear-gradient(var(--line), var(--line)) no-repeat center / calc(100% - var(--gutter) - 16px) 1px;
+  background-position-x: var(--gutter);
+}
+.cm-divider.cm-activeLine {
+  color: var(--ink-3);
+}
+
+/* Marker box sits in the left gutter so to-dos and notes share one text edge. */
+.cm-box {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  margin-left: -24px;
+  margin-right: 10px;
+  vertical-align: -2px;
+  border: 1.5px solid var(--box);
+  border-radius: 4px;
+  color: var(--ink-3);
+  cursor: pointer;
+  position: relative;
+}
+/* 28px hit area without changing the drawn box. */
+.cm-box::after {
+  content: "";
+  position: absolute;
+  inset: -7px;
+}
+@media (hover: hover) and (pointer: fine) {
+  .cm-box:hover {
+    border-color: var(--ink-2);
+    background: var(--hover);
+  }
+}
+.cm-box-snooze {
+  border-radius: 50%;
+}
+
+.cm-done,
+.cm-snooze {
+  color: var(--ink-3);
+}
+
+.cm-time {
+  font-family: "Geist Mono Variable", ui-monospace, monospace;
+  font-size: 0.92em;
+  color: var(--ink-2);
+}
+
+.cm-tag {
+  margin-left: 8px;
+  font-size: 12px;
+  color: var(--ink-2);
+}
+
+/* Ctrl+F / Ctrl+H panel, kept quiet. */
+.cm-panels {
+  background: var(--bg);
+  color: var(--ink);
+  border: none;
+}
+.cm-panels-top {
+  border-bottom: 1px solid var(--line);
+}
+.cm-search {
+  padding: 6px 12px 8px var(--gutter);
+  font-size: 12px;
+  font-family: inherit;
+}
+.cm-search input,
+.cm-search button {
+  font: inherit;
+  color: inherit;
+  background: var(--hover);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 3px 8px;
+}
+.cm-search input:focus-visible,
+.cm-search button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+.cm-search label {
+  color: var(--ink-2);
+}
+.cm-search [name="close"] {
+  color: var(--ink-2);
+  background: transparent;
+  border: none;
+}
+}
