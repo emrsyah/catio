@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <!-- Concept #3: text caret with cat ears. Secondary mark (empty states, website). -->
+  <path d="M150 168 L180 72 L232 150 Z" fill="#E2552D"/>
+  <path d="M362 168 L332 72 L280 150 Z" fill="#E2552D"/>
+  <path d="M206 186 Q256 186 256 216 Q256 186 306 186 M256 216 V420 M206 450 Q256 450 256 420 Q256 450 306 450" fill="none" stroke="#1F1E1C" stroke-width="28" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>
