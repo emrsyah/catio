@@ -70,11 +70,12 @@
   box-sizing: border-box;
 }
 
+/* The window is transparent (for dock mode). The body's background paints the canvas,
+   so the floating pad stays solid; docked, the body goes transparent. */
 html,
 body {
   margin: 0;
   height: 100%;
-  background: var(--bg);
   color: var(--ink);
   font-family: "Geist Variable", "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
   -webkit-font-smoothing: antialiased;
@@ -82,6 +83,14 @@ body {
 }
 
 body {
+  display: flex;
+  flex-direction: column;
+  background: var(--bg);
+}
+.frame,
+.shell {
+  flex: 1;
+  min-height: 0;
   display: flex;
   flex-direction: column;
 }
@@ -157,35 +166,98 @@ body {
 .is-max .rz { display: none; }
 
 /* ---------- dock mode ---------- */
+/* The window is transparent and its bottom-right corner is fixed. The shell is a card that
+   morphs between the 48px icon (clipped to its bottom-right corner) and the full pad, so the
+   instant window resize behind it is never seen. Open: 300ms drawer curve. Close: 200ms. */
 .dock-icon {
   display: none;
+}
+.is-docked {
+  --dock-pad: 8px; /* keep in sync with PAD in dock.rs */
+  --dock-icon: 48px;
+  --dock-open: 300ms;
+  --dock-close: 200ms;
+  --ease-drawer: cubic-bezier(0.32, 0.72, 0, 1);
+  background: transparent;
 }
 .is-docked .rz,
 .is-docked #btn-max {
   display: none;
 }
-.is-docked:not(.is-expanded) .strip,
-.is-docked:not(.is-expanded) #editor {
-  display: none;
-}
-.is-docked:not(.is-expanded) .dock-icon {
+.is-docked .frame {
   position: fixed;
   inset: 0;
+  /* Crisp tactile edge that follows the clipped shape: ring, 1px drop, one short drop. */
+  filter: drop-shadow(0 0 0.5px rgb(31 30 28 / 0.3)) drop-shadow(0 1px 1px rgb(31 30 28 / 0.1))
+    drop-shadow(0 3px 4px rgb(31 30 28 / 0.12));
+}
+@media (prefers-color-scheme: dark) {
+  .is-docked .frame {
+    filter: drop-shadow(0 0 0.5px #5a5650) drop-shadow(0 1px 2px rgb(0 0 0 / 0.5))
+      drop-shadow(0 3px 4px rgb(0 0 0 / 0.4));
+  }
+}
+.is-docked .shell {
+  position: absolute;
+  inset: var(--dock-pad);
+  background: var(--bg);
+  /* Closed: only the icon-sized square at the bottom-right corner shows. */
+  clip-path: inset(calc(100% - var(--dock-icon)) 0 0 calc(100% - var(--dock-icon)) round 12px);
+  transition: clip-path var(--dock-close) var(--ease-out);
+}
+.is-docked.is-open .shell {
+  clip-path: inset(0 round 10px);
+  transition: clip-path var(--dock-open) var(--ease-drawer);
+}
+/* Pad content fades in once the card has some room, and leaves at once on close. */
+.is-docked .strip,
+.is-docked #editor {
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity var(--t-fast) var(--ease-out);
+}
+.is-docked.is-open .strip,
+.is-docked.is-open #editor {
+  opacity: 1;
+  pointer-events: auto;
+  transition: opacity var(--t-slow) var(--ease-out) 60ms;
+}
+.is-docked .dock-icon {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  width: var(--dock-icon);
+  height: var(--dock-icon);
   display: grid;
   place-items: center;
   border: 0;
   padding: 0;
-  background: var(--bg);
+  background: transparent;
   cursor: pointer;
+  transition: opacity var(--t) var(--ease-out) 40ms;
+}
+.is-docked.is-open .dock-icon {
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity var(--t-fast) var(--ease-out);
+}
+/* State changes the user didn't watch (hotkey collapse) jump straight to the end. */
+.is-docked.dock-snap .shell,
+.is-docked.dock-snap .strip,
+.is-docked.dock-snap #editor,
+.is-docked.dock-snap .dock-icon {
+  transition: none !important;
+}
+@media (prefers-reduced-motion: reduce) {
+  .is-docked .shell,
+  .is-docked.is-open .shell {
+    transition: none;
+  }
 }
 .dock-icon svg {
   width: 30px;
   height: 30px;
   transition: transform var(--t) var(--ease-out);
-}
-/* The icon settles in when the pad folds away. Purpose: show where the pad went. */
-.is-docked:not(.is-expanded) .dock-icon svg {
-  animation: dock-icon-in var(--t-slow) var(--ease-out) both;
 }
 .dock-icon:active svg {
   transform: scale(var(--squeeze-sm));
@@ -215,36 +287,6 @@ body {
 }
 .is-docked #btn-dock {
   color: var(--accent-text);
-}
-
-/* Expanded from the corner: the pad grows out of the icon's spot. */
-.is-docked.is-expanded .strip,
-.is-docked.is-expanded #editor {
-  transform-origin: 100% 100%;
-  animation: dock-open var(--t-slow) var(--ease-out) both;
-  transition:
-    opacity var(--t-fast) var(--ease-out),
-    transform var(--t-fast) var(--ease-out);
-}
-/* Leaving: a quick fold back toward the corner, faster than the open. */
-.is-docked.is-collapsing .strip,
-.is-docked.is-collapsing #editor {
-  animation: none;
-  opacity: 0;
-  transform: scale(var(--squeeze)) translate(var(--lift), var(--lift));
-}
-
-@keyframes dock-open {
-  from {
-    opacity: 0;
-    transform: scale(var(--squeeze)) translate(var(--lift), var(--lift));
-  }
-}
-@keyframes dock-icon-in {
-  from {
-    opacity: 0;
-    transform: scale(var(--squeeze-sm));
-  }
 }
 
 /* Where a dragged line will land. Glides between gaps instead of teleporting. */

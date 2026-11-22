@@ -212,10 +212,31 @@ async function chooseFolder() {
 
 const DOCK_KEY = "catio.dock";
 const COLLAPSE_DELAY_MS = 350;
-const FOLD_MS = 120; // matches --t-fast: the pad folds toward the corner, then the window shrinks
+const DOCK_CLOSE_MS = 200; // matches --dock-close: the card shrinks to the icon, then the window does
 let docked = false;
-let expanded = false;
+let expanded = false; // window state, from Rust
 let collapseTimer: number | undefined;
+const body = document.body;
+
+/** Runs cb after the window has actually grown and painted one frame at the new size,
+ *  so the card starts opening from the icon's spot instead of mid-resize. */
+function whenWindowOpen(cb: () => void) {
+  const ready = () => requestAnimationFrame(() => requestAnimationFrame(cb));
+  if (window.innerWidth > 100) return ready();
+  window.addEventListener("resize", function onResize() {
+    if (window.innerWidth <= 100) return;
+    window.removeEventListener("resize", onResize);
+    ready();
+  });
+}
+
+/** Animated close: card shrinks into the icon, then the (now invisible) window shrinks. */
+function closeDock() {
+  window.clearTimeout(collapseTimer);
+  if (dirty) void save();
+  body.classList.remove("is-open");
+  collapseTimer = window.setTimeout(() => invoke("dock_collapse").catch(console.error), DOCK_CLOSE_MS);
+}
 
 function setDock(on: boolean) {
   try {
@@ -241,9 +262,15 @@ async function setupDock() {
   await listen<{ docked: boolean; expanded: boolean }>("dock-state", (e) => {
     docked = e.payload.docked;
     expanded = e.payload.expanded;
-    document.body.classList.toggle("is-docked", docked);
-    document.body.classList.toggle("is-expanded", expanded);
-    if (!expanded) document.body.classList.remove("is-collapsing");
+    body.classList.toggle("is-docked", docked);
+    if (docked && expanded) {
+      whenWindowOpen(() => expanded && body.classList.add("is-open"));
+    } else if (body.classList.contains("is-open")) {
+      // Closed without our animation (hotkey, tray): jump to the icon, no half-drawn frames.
+      body.classList.add("dock-snap");
+      body.classList.remove("is-open");
+      requestAnimationFrame(() => requestAnimationFrame(() => body.classList.remove("dock-snap")));
+    }
     if (docked && !expanded) updateDockBadge();
   });
   await listen<boolean>("dock-request", (e) => setDock(e.payload));
@@ -254,18 +281,16 @@ async function setupDock() {
   // Hover opens a preview without stealing the keyboard; click inside to edit.
   root.addEventListener("mouseenter", () => {
     window.clearTimeout(collapseTimer);
-    document.body.classList.remove("is-collapsing"); // came back mid-fold: unfold
-    if (docked && !expanded) invoke("dock_expand", { focus: false }).catch(console.error);
+    if (!docked) return;
+    // Came back while the card was closing: it reverses from wherever it is (a transition).
+    if (expanded) body.classList.add("is-open");
+    else invoke("dock_expand", { focus: false }).catch(console.error);
   });
   // Leaving shrinks it back, after a short grace so a wobble past the edge doesn't snap it shut.
   root.addEventListener("mouseleave", () => {
-    if (!docked || !expanded || document.body.classList.contains("is-dragging")) return;
+    if (!docked || !expanded || body.classList.contains("is-dragging")) return;
     window.clearTimeout(collapseTimer);
-    collapseTimer = window.setTimeout(() => {
-      if (dirty) void save();
-      document.body.classList.add("is-collapsing");
-      collapseTimer = window.setTimeout(() => invoke("dock_collapse").catch(console.error), FOLD_MS);
-    }, COLLAPSE_DELAY_MS);
+    collapseTimer = window.setTimeout(closeDock, COLLAPSE_DELAY_MS);
   });
   try {
     if (localStorage.getItem(DOCK_KEY) === "1") setDock(true);
@@ -277,6 +302,7 @@ async function setupDock() {
 // ---------- window ----------
 
 function hidePad() {
+  if (docked && expanded) return closeDock(); // Esc / × in dock mode: same animated close
   if (dirty) void save();
   invoke("hide_pad").catch(console.error);
 }

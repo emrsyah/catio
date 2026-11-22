@@ -6,6 +6,8 @@
     <title>Catio</title>
   </head>
   <body>
+    <!-- frame: shadow room (dock mode). shell: the card that morphs between icon and pad. -->
+    <div class="frame"><div class="shell" id="shell">
     <div class="strip" data-tauri-drag-region>
       <span class="status" id="status" role="status" aria-live="polite"></span>
       <div class="controls">
@@ -34,6 +36,7 @@
       </svg>
       <span class="dock-badge" id="dock-badge" hidden></span>
     </button>
+    </div></div>
 
     <!-- Undecorated window: these edges are the resize borders. -->
     <div class="rz rz-n" data-dir="North"></div>
