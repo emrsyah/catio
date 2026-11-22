@@ -1,4 +1,4 @@
-/* Tokens from the V5 design (after the contrast pass). */
+/* Tokens from the V5 design (after the contrast pass), plus tactile surfaces and motion. */
 :root {
   --bg: #fbfaf8;
   --ink: #1f1e1c;
@@ -7,12 +7,31 @@
   --line: #ece9e4;
   --box: #8e8a83; /* control stroke, 3:1 */
   --hover: #f2f0ec;
+  --well: #efede9; /* sunk fields */
   --accent: #e2552d; /* bars, rings, non-text */
   --accent-text: #b5441f; /* small orange text, 4.5:1 */
   --accent-soft: #e2552d1f;
   --selection: #e2552d29;
+  --focus-ring: var(--ink-2);
   --fs: 14px;
   --gutter: 44px;
+
+  /* Tactile: raised = top surface + a fine ring + a crisp 1px drop. No soft blurs. */
+  --surface-top: #ffffff;
+  --ring: 0 0 0 1px rgb(31 30 28 / 0.08);
+  --drop: 0 1px 2px 0 rgb(31 30 28 / 0.12);
+  --shadow-button: var(--ring), var(--drop);
+  --shadow-menu: 0 0 0 1px rgb(31 30 28 / 0.07), var(--drop), 0 4px 8px -4px rgb(31 30 28 / 0.16);
+
+  /* Motion: one strong ease-out for everything the user causes. */
+  --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
+  --t-fast: 120ms;
+  --t: 150ms;
+  --t-slow: 220ms;
+  --lift: 4px; /* travel on enter; 0 under reduced motion */
+  --squeeze: 0.97; /* press / pick-up scale; 1 under reduced motion */
+  --squeeze-sm: 0.92; /* small targets squeeze more */
+
   color-scheme: light dark;
 }
 
@@ -25,10 +44,25 @@
     --line: #2e2c29;
     --box: #7a766f;
     --hover: #2a2926;
+    --well: #171615;
     --accent: #f0693f;
     --accent-text: #f0693f;
     --accent-soft: #f0693f26;
     --selection: #f0693f33;
+
+    /* Dark: lighter fill + one solid 0.5px outline + a tight black drop, never a glow. */
+    --surface-top: #2a2926;
+    --ring: 0 0 0 0.5px #45423d;
+    --drop: 0 1px 2px 0 rgb(0 0 0 / 0.5);
+    --shadow-menu: 0 0 0 0.5px #45423d, var(--drop), 0 4px 8px -4px rgb(0 0 0 / 0.6);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --lift: 0px;
+    --squeeze: 1;
+    --squeeze-sm: 1;
   }
 }
 
@@ -67,8 +101,9 @@ body {
 
 .controls {
   display: flex;
+  gap: 2px;
   opacity: 0;
-  transition: opacity 120ms ease;
+  transition: opacity var(--t) var(--ease-out);
 }
 .strip:hover .controls,
 .controls:focus-within {
@@ -84,13 +119,22 @@ body {
   background: transparent;
   color: var(--ink-2);
   cursor: pointer;
+  transition:
+    background-color var(--t) var(--ease-out),
+    color var(--t) var(--ease-out),
+    transform var(--t) var(--ease-out);
 }
-.controls button:hover {
-  background: var(--hover);
-  color: var(--ink);
+@media (hover: hover) and (pointer: fine) {
+  .controls button:hover {
+    background: var(--hover);
+    color: var(--ink);
+  }
+}
+.controls button:active {
+  transform: scale(var(--squeeze-sm));
 }
 .controls button:focus-visible {
-  outline: 2px solid var(--accent);
+  outline: 2px solid var(--focus-ring);
   outline-offset: -2px;
 }
 
@@ -137,9 +181,17 @@ body {
 .dock-icon svg {
   width: 30px;
   height: 30px;
+  transition: transform var(--t) var(--ease-out);
+}
+/* The icon settles in when the pad folds away. Purpose: show where the pad went. */
+.is-docked:not(.is-expanded) .dock-icon svg {
+  animation: dock-icon-in var(--t-slow) var(--ease-out) both;
+}
+.dock-icon:active svg {
+  transform: scale(var(--squeeze-sm));
 }
 .dock-icon:focus-visible {
-  outline: 2px solid var(--accent);
+  outline: 2px solid var(--focus-ring);
   outline-offset: -3px;
 }
 /* Open focus to-dos waiting: a small count, so the icon still tells you something. */
@@ -158,19 +210,53 @@ body {
   line-height: 16px;
   text-align: center;
   font-variant-numeric: tabular-nums;
+  /* Edge from its own colour, never a glow. */
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 70%, #000), 0 1px 2px 0 rgb(0 0 0 / 0.18);
 }
 .is-docked #btn-dock {
   color: var(--accent-text);
 }
 
-/* Where a dragged line will land. */
+/* Expanded from the corner: the pad grows out of the icon's spot. */
+.is-docked.is-expanded .strip,
+.is-docked.is-expanded #editor {
+  transform-origin: 100% 100%;
+  animation: dock-open var(--t-slow) var(--ease-out) both;
+  transition:
+    opacity var(--t-fast) var(--ease-out),
+    transform var(--t-fast) var(--ease-out);
+}
+/* Leaving: a quick fold back toward the corner, faster than the open. */
+.is-docked.is-collapsing .strip,
+.is-docked.is-collapsing #editor {
+  animation: none;
+  opacity: 0;
+  transform: scale(var(--squeeze)) translate(var(--lift), var(--lift));
+}
+
+@keyframes dock-open {
+  from {
+    opacity: 0;
+    transform: scale(var(--squeeze)) translate(var(--lift), var(--lift));
+  }
+}
+@keyframes dock-icon-in {
+  from {
+    opacity: 0;
+    transform: scale(var(--squeeze-sm));
+  }
+}
+
+/* Where a dragged line will land. Glides between gaps instead of teleporting. */
 .drop-line {
   position: fixed;
+  top: 0;
   height: 2px;
   border-radius: 1px;
   background: var(--accent);
   pointer-events: none;
   z-index: 20;
+  transition: transform 90ms var(--ease-out);
 }
 .drop-line::before {
   content: "";
@@ -182,8 +268,13 @@ body {
   border-radius: 50%;
   background: var(--accent);
 }
+@media (prefers-reduced-motion: reduce) {
+  .drop-line {
+    transition: none;
+  }
+}
 
-/* Copy of the dragged line that follows the pointer. */
+/* Copy of the dragged line that follows the pointer: an overlay, lifted off the page. */
 .drag-ghost {
   position: fixed;
   z-index: 30;
@@ -193,7 +284,7 @@ body {
   max-width: 240px;
   padding: 4px 10px 4px 8px;
   border-radius: 8px;
-  background: var(--bg);
+  background: var(--surface-top);
   color: var(--ink);
   font-size: var(--fs);
   font-weight: 500;
@@ -202,10 +293,24 @@ body {
   overflow: hidden;
   text-overflow: ellipsis;
   pointer-events: none;
-  box-shadow:
-    0 0 0 1px var(--line),
-    0 6px 16px rgb(0 0 0 / 0.14),
-    0 1px 3px rgb(0 0 0 / 0.08);
+  box-shadow: var(--shadow-menu);
+  transform-origin: 0 50%;
+  animation: ghost-in var(--t) var(--ease-out) both;
+}
+.drag-ghost.is-leaving {
+  animation: ghost-out var(--t-fast) var(--ease-out) both;
+}
+@keyframes ghost-in {
+  from {
+    opacity: 0;
+    transform: scale(var(--squeeze));
+  }
+}
+@keyframes ghost-out {
+  to {
+    opacity: 0;
+    transform: scale(var(--squeeze));
+  }
 }
 .drag-ghost-box {
   flex: none;
@@ -236,7 +341,8 @@ body {
 }
 
 .status {
-  font-size: 11px;
+  font-size: 12px;
+  line-height: 16px;
   color: var(--ink-2);
   pointer-events: none;
   white-space: nowrap;
@@ -254,11 +360,18 @@ body {
   border: 0;
   padding: 0;
   text-decoration: underline;
+  text-decoration-color: color-mix(in srgb, currentColor 40%, transparent);
   text-underline-offset: 2px;
   cursor: pointer;
+  transition: text-decoration-color var(--t) var(--ease-out);
+}
+@media (hover: hover) and (pointer: fine) {
+  .status-action:hover {
+    text-decoration-color: currentColor;
+  }
 }
 .status-action:focus-visible {
-  outline: 2px solid var(--accent);
+  outline: 2px solid var(--focus-ring);
   outline-offset: 2px;
   border-radius: 2px;
 }
@@ -292,10 +405,14 @@ body {
 .cm-line {
   position: relative;
   padding: 0 16px 0 var(--gutter);
+  /* Checking a box fades the text to done instead of snapping. */
+  transition:
+    color var(--t) var(--ease-out),
+    background-color var(--t) var(--ease-out);
 }
 
-/* Drag grip: six dots at the far left of every text or task line, shown on hover.
-   The grip area (and the whole left gutter) shows a grab cursor; dragging shows grabbing. */
+/* Drag grip: six dots at the far left of a line, only while the pointer is in the
+   left gutter (cm-zone-grip is set by the editor on mousemove). */
 @media (hover: hover) and (pointer: fine) {
   .cm-text::before,
   .cm-task::before {
@@ -312,9 +429,12 @@ body {
       center / 8px 12px no-repeat;
     opacity: 0;
     cursor: grab;
+    transition:
+      opacity var(--t) var(--ease-out),
+      background-color var(--t) var(--ease-out);
   }
-  .cm-text:hover::before,
-  .cm-task:hover::before {
+  .cm-zone-grip .cm-text:hover::before,
+  .cm-zone-grip .cm-task:hover::before {
     opacity: 1;
   }
 }
@@ -374,6 +494,7 @@ body {
   width: 28px;
   height: 28px;
 }
+/* A small raised control: top surface, 3:1 stroke, a crisp 1px drop. */
 .cm-check {
   display: inline-flex;
   align-items: center;
@@ -382,22 +503,65 @@ body {
   height: 14px;
   border: 1.5px solid var(--box);
   border-radius: 4px;
+  background: var(--surface-top);
+  box-shadow: var(--drop);
   color: var(--ink-3);
+  transition:
+    border-color var(--t) var(--ease-out),
+    background-color var(--t) var(--ease-out),
+    box-shadow var(--t) var(--ease-out);
 }
 @media (hover: hover) and (pointer: fine) {
   .cm-box:hover .cm-check {
     border-color: var(--ink-2);
-    background: var(--hover);
   }
+}
+/* Done sinks into the page: no drop, well fill. */
+.cm-box-done .cm-check {
+  background: var(--well);
+  border-color: var(--ink-3);
+  box-shadow: none;
 }
 .cm-box-snooze .cm-check {
   border-radius: 50%;
+  box-shadow: none;
+  background: transparent;
+}
+/* The box you just clicked squeezes and settles; the tick draws itself. */
+.cm-box.is-fresh .cm-check {
+  animation: box-settle var(--t-slow) var(--ease-out);
+}
+.cm-box-done.is-fresh path {
+  stroke-dasharray: 1;
+  animation: tick-draw var(--t-slow) var(--ease-out) both;
+}
+@keyframes box-settle {
+  from {
+    transform: scale(var(--squeeze-sm));
+  }
+}
+@keyframes tick-draw {
+  from {
+    stroke-dashoffset: 1;
+  }
+  to {
+    stroke-dashoffset: 0;
+  }
 }
 
 /* The line being dragged stays in place, tinted, so you can see what left where. */
 .cm-drag-source {
   background-color: var(--accent-soft);
   color: var(--ink-2);
+}
+/* The line that just landed glows once, then fades back to the page. */
+.cm-landed {
+  animation: landed 700ms var(--ease-out);
+}
+@keyframes landed {
+  from {
+    background-color: var(--accent-soft);
+  }
 }
 
 .cm-done,
@@ -411,7 +575,7 @@ body {
   color: var(--ink-2);
 }
 
-/* Right gutter: time and the hover action ("nanti" / "besok"). */
+/* Right gutter: time and the action ("nanti" / "hapus" / "besok"). */
 .cm-has-right {
   padding-right: 88px;
 }
@@ -437,18 +601,31 @@ body {
   color: var(--ink-2);
   cursor: pointer;
   border-radius: 4px;
-}
-.cm-ract:hover {
-  color: var(--ink);
   text-decoration: underline;
+  text-decoration-color: transparent;
   text-underline-offset: 2px;
+  transition:
+    opacity var(--t) var(--ease-out),
+    color var(--t) var(--ease-out),
+    text-decoration-color var(--t) var(--ease-out);
 }
-/* "nanti" only on hover so the gutter stays quiet; "besok" is a state, always shown. */
-.cm-ract-nanti {
+@media (hover: hover) and (pointer: fine) {
+  .cm-ract:hover {
+    color: var(--ink);
+    text-decoration-color: currentColor;
+  }
+  .cm-ract-hapus:hover {
+    color: var(--accent-text);
+  }
+}
+/* "nanti" and "hapus" only show with the pointer near the right edge of that line,
+   so the gutter stays quiet. "besok" is a state, always shown. */
+.cm-ract-nanti,
+.cm-ract-hapus {
   opacity: 0;
 }
-.cm-line:hover .cm-ract-nanti,
-.cm-activeLine .cm-ract-nanti {
+.cm-zone-right .cm-line:hover .cm-ract-nanti,
+.cm-zone-right .cm-line:hover .cm-ract-hapus {
   opacity: 1;
 }
 
@@ -466,21 +643,26 @@ body {
   color: var(--ink-2);
   font-size: 12px;
   white-space: nowrap;
+  animation: fade-in var(--t-slow) var(--ease-out) both;
 }
 .cm-ract-link {
   color: var(--ink);
-  text-decoration: underline;
-  text-underline-offset: 2px;
+  text-decoration-color: color-mix(in srgb, currentColor 40%, transparent);
+}
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
 }
 
-/* Ctrl+F / Ctrl+H panel, kept quiet. */
+/* Ctrl+F / Ctrl+H panel: fields are wells, buttons are raised. */
 .cm-panels {
   background: var(--bg);
   color: var(--ink);
   border: none;
 }
 .cm-panels-top {
-  border-bottom: 1px solid var(--line);
+  border-bottom: 0.5px solid var(--line);
 }
 .cm-search {
   padding: 6px 12px 8px var(--gutter);
@@ -491,14 +673,30 @@ body {
 .cm-search button {
   font: inherit;
   color: inherit;
-  background: var(--hover);
-  border: 1px solid var(--line);
+  border: 0;
   border-radius: 6px;
   padding: 3px 8px;
+  transition:
+    background-color var(--t) var(--ease-out),
+    transform var(--t) var(--ease-out);
+}
+.cm-search input {
+  background: var(--well);
+}
+.cm-search input:focus {
+  background: var(--hover);
+}
+.cm-search button {
+  background: var(--surface-top);
+  box-shadow: var(--shadow-button);
+  cursor: pointer;
+}
+.cm-search button:active {
+  transform: scale(var(--squeeze));
 }
 .cm-search input:focus-visible,
 .cm-search button:focus-visible {
-  outline: 2px solid var(--accent);
+  outline: 2px solid var(--focus-ring);
   outline-offset: 1px;
 }
 .cm-search label {
@@ -507,6 +705,6 @@ body {
 .cm-search [name="close"] {
   color: var(--ink-2);
   background: transparent;
-  border: none;
+  box-shadow: none;
 }
 }

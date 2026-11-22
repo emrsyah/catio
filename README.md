@@ -23,7 +23,7 @@ File-nya ada di `Documents\Catio\catio.md`. Bisa dibuka di Notepad kapan aja. Pe
 | `Esc` | Tutup pencarian → hapus seleksi → sembunyiin pad |
 | `[]` | Jadi checkbox `[ ] ` |
 | `Ctrl+Enter` | Centang / buka centang (teks biasa jadi to-do) |
-| `Ctrl+Shift+Enter` | Tunda sampai besok (`[>]`), atau balikin. Hover baris → "nanti" |
+| `Ctrl+Shift+Enter` | Tunda sampai besok (`[>]`), atau balikin. Kursor di ujung kanan baris → "nanti" (to-do yang udah beres: "hapus") |
 | `Ctrl+Shift+Backspace` | Bersihin: yang selesai pindah ke `arsip.md` (ada "batal" 8 detik) |
 | Tarik titik-titik di kiri / checkbox | Pindahin baris. Drop di atas `---` = masuk fokus |
 | `F11` / double-click strip | Full screen |

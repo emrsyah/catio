@@ -38,8 +38,33 @@ interface StatusAction {
   run: () => void;
 }
 
+const EASE_OUT = "cubic-bezier(0.23, 1, 0.32, 1)";
+const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
+let statusAnim: Animation | undefined;
+
+/** Status text fades out instead of vanishing mid-read. */
+function clearStatus() {
+  if (!statusEl.childNodes.length) return;
+  statusAnim?.cancel();
+  statusAnim = statusEl.animate([{ opacity: 1 }, { opacity: 0 }], { duration: 160, easing: EASE_OUT });
+  statusAnim.onfinish = () => statusEl.replaceChildren();
+}
+
 function setStatus(text: string, tone: "quiet" | "accent" = "quiet", holdMs = 0, action?: StatusAction) {
+  statusAnim?.cancel();
+  const same = statusEl.textContent === text && !action;
   statusEl.replaceChildren(text);
+  // A new message rises in a hair; repeating the same one ("tersimpan") stays still.
+  if (!same) {
+    const lift = reducedMotion.matches ? "0px" : "2px";
+    statusAnim = statusEl.animate(
+      [
+        { opacity: 0, transform: `translateY(${lift})` },
+        { opacity: 1, transform: "none" },
+      ],
+      { duration: 180, easing: EASE_OUT },
+    );
+  }
   statusEl.dataset.tone = tone;
   statusClearsOnEdit = false;
   if (action) {
@@ -54,7 +79,7 @@ function setStatus(text: string, tone: "quiet" | "accent" = "quiet", holdMs = 0,
     statusEl.append(" · ", btn);
   }
   window.clearTimeout(statusTimer);
-  if (holdMs) statusTimer = window.setTimeout(() => statusEl.replaceChildren(), holdMs);
+  if (holdMs) statusTimer = window.setTimeout(clearStatus, holdMs);
 }
 
 /** "C:\Users\x\Documents\Catio\catio.md" → "Documents\Catio\catio.md" */
@@ -91,7 +116,8 @@ function onChange(u: ViewUpdate) {
   if (u.transactions.some((t) => t.annotation(external))) return;
   if (statusClearsOnEdit) {
     statusClearsOnEdit = false;
-    statusEl.replaceChildren();
+    window.clearTimeout(statusTimer);
+    clearStatus();
   }
   dirty = true;
   window.clearTimeout(saveTimer);
@@ -186,6 +212,7 @@ async function chooseFolder() {
 
 const DOCK_KEY = "catio.dock";
 const COLLAPSE_DELAY_MS = 350;
+const FOLD_MS = 120; // matches --t-fast: the pad folds toward the corner, then the window shrinks
 let docked = false;
 let expanded = false;
 let collapseTimer: number | undefined;
@@ -216,6 +243,7 @@ async function setupDock() {
     expanded = e.payload.expanded;
     document.body.classList.toggle("is-docked", docked);
     document.body.classList.toggle("is-expanded", expanded);
+    if (!expanded) document.body.classList.remove("is-collapsing");
     if (docked && !expanded) updateDockBadge();
   });
   await listen<boolean>("dock-request", (e) => setDock(e.payload));
@@ -226,6 +254,7 @@ async function setupDock() {
   // Hover opens a preview without stealing the keyboard; click inside to edit.
   root.addEventListener("mouseenter", () => {
     window.clearTimeout(collapseTimer);
+    document.body.classList.remove("is-collapsing"); // came back mid-fold: unfold
     if (docked && !expanded) invoke("dock_expand", { focus: false }).catch(console.error);
   });
   // Leaving shrinks it back, after a short grace so a wobble past the edge doesn't snap it shut.
@@ -234,7 +263,8 @@ async function setupDock() {
     window.clearTimeout(collapseTimer);
     collapseTimer = window.setTimeout(() => {
       if (dirty) void save();
-      invoke("dock_collapse").catch(console.error);
+      document.body.classList.add("is-collapsing");
+      collapseTimer = window.setTimeout(() => invoke("dock_collapse").catch(console.error), FOLD_MS);
     }, COLLAPSE_DELAY_MS);
   });
   try {

@@ -66,11 +66,13 @@ class BoxWidget extends WidgetType {
     const el = document.createElement("span");
     el.className = `cm-box cm-box-${this.state}`;
     el.setAttribute("aria-hidden", "true");
+    // Only the box you just clicked animates; boxes scrolled into view stay still.
+    if (performance.now() - toggledAt < 300) el.classList.add("is-fresh");
     const box = document.createElement("span");
     box.className = "cm-check";
     if (this.state === "done") {
       box.innerHTML =
-        '<svg viewBox="0 0 14 14" width="14" height="14"><path d="M3.5 7.2l2.3 2.3 4.7-4.9" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+        '<svg viewBox="0 0 14 14" width="14" height="14"><path pathLength="1" d="M3.5 7.2l2.3 2.3 4.7-4.9" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>';
     } else if (this.state === "snooze") {
       box.innerHTML =
         '<svg viewBox="0 0 14 14" width="14" height="14"><path d="M6 4.5L8.5 7 6 9.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>';
@@ -85,12 +87,19 @@ class BoxWidget extends WidgetType {
 
 /**
  * Right gutter: the time (mono), plus a hover action. Open to-dos offer "nanti" (snooze
- * until tomorrow); snoozed lines show "besok", which un-snoozes on click.
+ * until tomorrow), done ones offer "hapus"; snoozed lines show "besok", which un-snoozes on click.
  */
+type RightAction = "nanti" | "hapus" | "besok";
+const ACTIONS: Record<RightAction, { act: string; title: string }> = {
+  nanti: { act: "snooze", title: "Tunda sampai besok (Ctrl+Shift+Enter)" },
+  hapus: { act: "delete", title: "Hapus baris ini (Ctrl+Z buat balikin)" },
+  besok: { act: "wake", title: "Balikin sekarang" },
+};
+
 class RightWidget extends WidgetType {
   constructor(
     readonly time: string | null,
-    readonly action: "nanti" | "besok" | null,
+    readonly action: RightAction | null,
   ) {
     super();
   }
@@ -103,9 +112,9 @@ class RightWidget extends WidgetType {
     if (this.action) {
       const a = document.createElement("span");
       a.className = `cm-ract cm-ract-${this.action}`;
-      a.dataset.act = this.action === "nanti" ? "snooze" : "wake";
+      a.dataset.act = ACTIONS[this.action].act;
       a.textContent = this.action;
-      a.title = this.action === "nanti" ? "Tunda sampai besok (Ctrl+Shift+Enter)" : "Balikin sekarang";
+      a.title = ACTIONS[this.action].title;
       el.appendChild(a);
     }
     if (this.time) {
@@ -196,7 +205,8 @@ function buildDecorations(view: EditorView): DecorationSet {
           out.push(hideToken.range(ln.from + start, ln.from + p.time.to));
         }
       }
-      const action = p.kind === "todo" ? "nanti" : p.kind === "snooze" ? "besok" : null;
+      const action: RightAction | null =
+        p.kind === "todo" ? "nanti" : p.kind === "done" ? "hapus" : p.kind === "snooze" ? "besok" : null;
       if (rightTime || action) {
         classes.push("cm-has-right");
         out.push(Decoration.widget({ widget: new RightWidget(rightTime, action), side: 1 }).range(ln.to));
@@ -239,6 +249,7 @@ const decorations = ViewPlugin.fromClass(
           e.preventDefault();
           const n = view.state.doc.lineAt(view.posAtDOM(act)).number;
           if (act.dataset.act === "clean") bersihin(view);
+          else if (act.dataset.act === "delete") deleteLineAt(view, n);
           else snoozeAt(view, [n]);
           return true;
         }
@@ -260,32 +271,56 @@ const decorations = ViewPlugin.fromClass(
         });
         return true;
       },
+      // The grip shows only while the pointer is in the left gutter, and the right-hand
+      // action ("nanti" / "hapus") only near the right edge, so the page stays quiet.
+      mousemove(e, view) {
+        const r = view.contentDOM.getBoundingClientRect();
+        view.dom.classList.toggle("cm-zone-grip", e.clientX < r.left + GUTTER);
+        view.dom.classList.toggle("cm-zone-right", e.clientX > r.right - RIGHT_ZONE);
+        return false;
+      },
+      mouseleave(_e, view) {
+        view.dom.classList.remove("cm-zone-grip", "cm-zone-right");
+        return false;
+      },
     },
   },
 );
 
 // ---------- drag & drop lines ----------
 
+const RIGHT_ZONE = 120;
+let toggledAt = 0;
+
 const GUTTER = 44; // keep in sync with --gutter in styles.css
 const DRAG_THRESHOLD = 4;
 
-/** Highlights the line being dragged. A state field so re-renders keep the highlight. */
-const setDragSource = StateEffect.define<number | null>();
-const dragSource = StateField.define<DecorationSet>({
-  create: () => Decoration.none,
-  update(value, tr) {
-    value = value.map(tr.changes);
-    for (const e of tr.effects) {
-      if (!e.is(setDragSource)) continue;
-      value =
-        e.value === null
-          ? Decoration.none
-          : Decoration.set([Decoration.line({ class: "cm-drag-source" }).range(tr.state.doc.line(e.value).from)]);
-    }
-    return value;
-  },
-  provide: (f) => EditorView.decorations.from(f),
-});
+/** A line-class marker driven by an effect (null clears). State fields survive re-renders. */
+function lineMarker(cls: string) {
+  const set = StateEffect.define<number | null>();
+  const field = StateField.define<DecorationSet>({
+    create: () => Decoration.none,
+    update(value, tr) {
+      value = value.map(tr.changes);
+      for (const e of tr.effects) {
+        if (!e.is(set)) continue;
+        value =
+          e.value === null
+            ? Decoration.none
+            : Decoration.set([Decoration.line({ class: cls }).range(tr.state.doc.line(e.value).from)]);
+      }
+      return value;
+    },
+    provide: (f) => EditorView.decorations.from(f),
+  });
+  return { set, field };
+}
+
+/** The line being dragged stays tinted in place. */
+const { set: setDragSource, field: dragSource } = lineMarker("cm-drag-source");
+/** The line that just landed glows briefly, so the eye finds where it went. */
+const { set: setLanded, field: landed } = lineMarker("cm-landed");
+const LANDED_MS = 700;
 
 /** A small copy of the line that follows the pointer, so it's clear what is being moved. */
 function makeGhost(view: EditorView, lineNo: number): HTMLElement {
@@ -306,7 +341,8 @@ function makeGhost(view: EditorView, lineNo: number): HTMLElement {
 /**
  * Press on a checkbox or the left gutter, then drag: the line moves where the orange
  * drop line is. A press without movement is a plain click (toggle / place caret).
- * Dropping above "---" puts the line into focus. No animation: this is a frequent action.
+ * Dropping above "---" puts the line into focus. Motion is short and only bridges position:
+ * the ghost lifts in, the drop line glides between gaps, the landed line glows once.
  */
 function startLineDrag(view: EditorView, source: number, down: MouseEvent, onClick: () => void) {
   const indicator = document.getElementById("drop-line") as HTMLElement | null;
@@ -344,10 +380,17 @@ function startLineDrag(view: EditorView, source: number, down: MouseEvent, onCli
     insertBefore = t.n;
     if (indicator) {
       const c = view.contentDOM.getBoundingClientRect();
+      const first = indicator.hidden;
       indicator.hidden = false;
-      indicator.style.top = `${Math.round(t.edge) - 1}px`;
       indicator.style.left = `${c.left + GUTTER - 24}px`;
       indicator.style.width = `${Math.max(0, c.width - GUTTER + 24 - 16)}px`;
+      // Glides between gaps; the first placement snaps so it doesn't fly in from the top.
+      if (first) indicator.style.transition = "none";
+      indicator.style.transform = `translateY(${Math.round(t.edge) - 1}px)`;
+      if (first) {
+        void indicator.offsetHeight;
+        indicator.style.transition = "";
+      }
     }
   };
 
@@ -356,7 +399,11 @@ function startLineDrag(view: EditorView, source: number, down: MouseEvent, onCli
     window.removeEventListener("mouseup", up);
     document.body.classList.remove("is-dragging");
     if (indicator) indicator.hidden = true;
-    ghost?.remove();
+    if (ghost) {
+      const g = ghost;
+      g.classList.add("is-leaving");
+      window.setTimeout(() => g.remove(), 120);
+    }
     if (!dragging) return onClick();
     view.dispatch({ effects: setDragSource.of(null) });
     moveLine(view, source, insertBefore);
@@ -374,8 +421,18 @@ function moveLine(view: EditorView, source: number, insertBefore: number) {
   lines.splice(index, 0, text);
   replaceDoc(view, lines.join("\n"), { userEvent: "move.drag" });
   const ln = view.state.doc.line(index + 1);
-  view.dispatch({ selection: { anchor: ln.to } });
+  view.dispatch({ selection: { anchor: ln.to }, effects: setLanded.of(index + 1) });
   view.focus();
+  window.setTimeout(() => view.dispatch({ effects: setLanded.of(null) }), LANDED_MS);
+}
+
+/** "hapus" on a finished to-do: the line goes away (Ctrl+Z brings it back). */
+function deleteLineAt(view: EditorView, n: number) {
+  const doc = view.state.doc;
+  const ln = doc.line(n);
+  const change =
+    n < doc.lines ? { from: ln.from, to: ln.to + 1 } : { from: Math.max(0, ln.from - 1), to: ln.to };
+  view.dispatch({ changes: change, userEvent: "delete.line" });
 }
 
 // ---------- commands ----------
@@ -385,6 +442,7 @@ function toggleAt(view: EditorView, lineNumbers: number[]) {
     const ln = view.state.doc.line(n);
     return { from: ln.from, to: ln.to, insert: toggleLine(ln.text) };
   });
+  toggledAt = performance.now();
   view.dispatch({ changes, userEvent: "input.toggle" });
 }
 
@@ -587,6 +645,7 @@ export function createEditor(parent: HTMLElement, doc: string, hooks: EditorHook
     lineStartInput,
     decorations,
     dragSource,
+    landed,
     zoomHandlers,
     catioKeymap,
     keymap.of([...searchKeymap, ...historyKeymap, ...defaultKeymap]),
