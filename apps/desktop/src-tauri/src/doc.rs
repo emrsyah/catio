@@ -112,6 +112,23 @@ impl DocState {
         Ok(text)
     }
 
+    /// Any pad's text as it is on disk (search, review and capture edit pads that aren't open).
+    pub fn read(&self, name: &str) -> io::Result<String> {
+        if clean_name(name).as_deref() != Some(name) {
+            return Err(io::Error::new(io::ErrorKind::InvalidInput, "nama pad nggak valid"));
+        }
+        read_normalized(&pad_path(&self.dir(), name))
+    }
+
+    pub fn archive_path(&self) -> PathBuf {
+        self.dir().join(ARCHIVE)
+    }
+
+    /// arsip.md, or empty when nothing was archived yet.
+    pub fn read_archive(&self) -> String {
+        read_normalized(&self.archive_path()).unwrap_or_default()
+    }
+
     /// Saves to the named pad. Naming it (instead of "the active one") means a save that
     /// was in flight while you switched pads still lands in the right file.
     pub fn save(&self, pad: &str, text: &str) -> io::Result<()> {

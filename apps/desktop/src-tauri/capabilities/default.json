@@ -1,8 +1,8 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "The pad window: events, drag strip. Everything else is an app command.",
-  "windows": ["pad"],
+  "description": "The pad and quick-capture windows: events, drag strip. Everything else is an app command.",
+  "windows": ["pad", "capture"],
   "permissions": [
     "core:default",
     "core:window:allow-start-dragging",

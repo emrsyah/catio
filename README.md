@@ -24,7 +24,11 @@ Klik nama pad di kiri atas buat lihat semua pad (dengan jumlah to-do yang belum 
 | Tombol | Fungsi |
 |---|---|
 | `Ctrl+Alt+N` | Munculin / sembunyiin pad (global) |
-| `Esc` | Tutup pencarian → hapus seleksi → sembunyiin pad |
+| `Alt+Shift+Space` | Tangkap cepat dari mana aja (global): ketik, `Enter`, masuk ke bawah `---` di pad yang kebuka |
+| `Ctrl+K` | Cari di semua pad + `arsip.md`. `Tab` ganti saringan (to-do terbuka, ada tanggal, #tag), `Ctrl+Enter` centang langsung |
+| `Ctrl+.` | Mode fokus: cuma baris "sekarang" yang terang, ada timer di strip. `Esc` keluar |
+| `Ctrl+[` | Lipat / buka baris yang menjorok di bawah baris ini ("meeting klien:" + isinya) |
+| `Esc` | Tutup pencarian → keluar mode fokus → hapus seleksi → sembunyiin pad |
 | `Ctrl+N` | Pad baru |
 | `Ctrl+Tab` / `Ctrl+Shift+Tab` | Pad berikutnya / sebelumnya |
 | `Ctrl+1`…`Ctrl+9` | Lompat ke pad ke-N |
@@ -49,12 +53,31 @@ Semua baris di atas `---` pertama itu fokus. To-do dengan jam atau tanggal bakal
 - Tanggal: `25 nov`, `25 november 2027`, `25/11`, `tgl 25`
 - Tanpa jam = diingetin jam 09:00 hari itu. Kata yang "geser" (`besok`, `senin`, `2 jam lagi`) dikunci jadi tanggal/jam pasti waktu kamu pindah baris, biar file-nya tetap benar besok.
 
+Detail kecil lainnya:
+
+- `#tag` dan `@orang` diwarnain dan jadi saringan di `Ctrl+K`.
+- Nomor panjang (rekening, HP) bergaris titik: klik = tersalin. Link: `Ctrl+klik` buat buka.
+- Paste list (`- a`, `- b` dari WhatsApp) masuk apa adanya, terus ada tawaran "jadiin N to-do?" (`Tab` buat terima).
+- To-do yang belum beres 2+ hari dapat label umur ("3 hari") di kanan. Umurnya disimpan di luar file, jadi `.md` tetap bersih.
+- Sekali sehari, kalau ada to-do nyangkut lebih dari seminggu, strip nawarin "review": satu-satu, `←` buang, `↓` minggu depan, `→` kerjain hari ini.
+- Fokus kosong? Garis `---` nawarin naikin to-do teratas di bawahnya.
+- File diubah dari luar pas kamu lagi ngetik: autosave nunggu, kamu pilih "pakai versi file" atau "pakai punya ini" (versi lain tetap disimpan jadi `*.conflict-*.md`).
+- Pad jadi tipis waktu kamu kerja di app lain dan kursor nggak di atasnya (matiin di tray: "Tipis pas nggak dipakai").
+- Dock: pengingat kurang dari 15 menit lagi → badge ganti jadi hitung mundur ("12m").
+- Full screen (`F11`): kolom kiri isinya semua pad, "To-do terbuka", "Ada tanggal", "Nyangkut > 7 hari", dan tag.
+- Undo (`Ctrl+Z`) dan posisi kursor tiap pad tetap kesimpan waktu pindah pad.
+
 ## Struktur
 
 ```
 packages/core/          parser murni (TS, tanpa dependency) + test node:test
 apps/desktop/           Vite + CodeMirror 6 (src/), Tauri v2 (src-tauri/)
   src/pads.ts                 menu pad (pindah, bikin, ganti nama, hapus)
+  src/store.ts                teks tiap pad di-parse sekali per versi + umur to-do
+  src/search.ts, review.ts    Ctrl+K dan review mingguan (overlay.ts dipakai bareng)
+  src/sidebar.ts              kolom kiri waktu full screen
+  src/capture.ts, capture.html  jendela tangkap cepat (cuma load @catio/core)
+  src-tauri/src/capture.rs    jendela tangkap cepat, dibikin pas pertama dipakai
   src-tauri/src/doc.rs        pad = file .md, simpan atomic, watcher, salinan konflik, .terhapus
   src-tauri/src/pad.rs        show/hide, balikin fokus, clamp ke monitor
   src-tauri/src/reminders.rs  timer pengingat → notifikasi
@@ -69,4 +92,4 @@ Mode dock: tombol ▣ di strip atau tray → pad ngecil jadi icon di pojok kanan
 
 Pindahin semua pad (misal ke OneDrive buat sinkron HP v0): tray → "Pindahin folder Catio…".
 
-Belum ada: ganti hotkey dari UI, umur tugas ("2 hari", butuh riwayat), penanda konflik di gutter + "pakai versi HP/laptop" (sekarang versi luar disimpan jadi `catio.conflict-*.md`), auto-sembunyi waktu ada app full screen, `Ctrl+K` cari arsip, riwayat & pulihkan, sinkron HP.
+Belum ada: ganti hotkey dari UI, auto-sembunyi waktu ada app full screen, riwayat & pulihkan, sinkron + app HP.

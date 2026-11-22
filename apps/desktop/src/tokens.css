@@ -1,0 +1,143 @@
+/* Tokens from the V5 design (after the contrast pass), plus tactile surfaces and motion.
+   Shared by the pad (styles.css) and the quick-capture field (capture.css). */
+:root {
+  --bg: #fbfaf8;
+  --ink: #1f1e1c;
+  --ink-2: #77736d; /* meaningful secondary text, 4.5:1 */
+  --ink-3: #8e8a83; /* done / inactive only */
+  --line: #ece9e4;
+  --box: #8e8a83; /* control stroke, 3:1 */
+  --hover: #f2f0ec;
+  --selected: #ebe8e3; /* chosen item: one step past hover */
+  --well: #efede9; /* sunk fields */
+  --accent: #e2552d; /* bars, rings, non-text */
+  --accent-text: #b5441f; /* small orange text, 4.5:1 */
+  --accent-soft: #e2552d1f;
+  --selection: #e2552d29;
+  --focus-ring: var(--ink-2);
+  --ok: #3f9d5a; /* saved dot */
+  --fs: 14px;
+  --gutter: 44px;
+  --mono: "Geist Mono Variable", ui-monospace, monospace;
+
+  /* Tactile: raised = top surface + a fine ring + a crisp 1px drop. No soft blurs. */
+  --surface-top: #ffffff;
+  --ring: 0 0 0 1px rgb(31 30 28 / 0.08);
+  --drop: 0 1px 2px 0 rgb(31 30 28 / 0.12);
+  --shadow-button: var(--ring), var(--drop);
+  --shadow-menu: 0 0 0 1px rgb(31 30 28 / 0.07), var(--drop), 0 4px 8px -4px rgb(31 30 28 / 0.16);
+  --shadow-modal: 0 0 0 1px rgb(31 30 28 / 0.07), var(--drop), 0 6px 8px -4px rgb(31 30 28 / 0.18);
+  --primary-bg: var(--ink);
+  --primary-fg: var(--bg);
+  --primary-hover: color-mix(in srgb, var(--ink) 93%, var(--bg));
+  --backdrop: rgb(0 0 0 / 0.3);
+
+  /* Motion: one strong ease-out for everything the user causes. */
+  --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
+  --t-fast: 120ms;
+  --t: 150ms;
+  --t-slow: 220ms;
+  --lift: 4px; /* travel on enter; 0 under reduced motion */
+  --squeeze: 0.97; /* press / pick-up scale; 1 under reduced motion */
+  --squeeze-sm: 0.92; /* small targets squeeze more */
+
+  color-scheme: light dark;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #1e1d1b;
+    --ink: #eceae6;
+    --ink-2: #9a968f;
+    --ink-3: #7a766f;
+    --line: #2e2c29;
+    --box: #7a766f;
+    --hover: #2a2926;
+    --selected: #34322e;
+    --well: #171615;
+    --accent: #f0693f;
+    --accent-text: #f0693f;
+    --accent-soft: #f0693f26;
+    --selection: #f0693f33;
+    --ok: #5cb874;
+
+    /* Dark: lighter fill + one solid 0.5px outline + a tight black drop, never a glow. */
+    --surface-top: #2a2926;
+    --ring: 0 0 0 0.5px #45423d;
+    --drop: 0 1px 2px 0 rgb(0 0 0 / 0.5);
+    --shadow-button: 0 0 0 0.5px #55524c, var(--drop);
+    --shadow-menu: 0 0 0 0.5px #45423d, var(--drop), 0 4px 8px -4px rgb(0 0 0 / 0.6);
+    --shadow-modal: 0 0 0 0.5px #45423d, var(--drop), 0 6px 8px -4px rgb(0 0 0 / 0.6);
+    --primary-hover: color-mix(in srgb, var(--ink) 90%, var(--bg));
+    --backdrop: rgb(0 0 0 / 0.6);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --lift: 0px;
+    --squeeze: 1;
+    --squeeze-sm: 1;
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+kbd {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--ink-3);
+}
+
+/* Buttons shared by overlays and the capture field. Primary = the one next step. */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  height: 32px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 6px;
+  background: var(--surface-top);
+  box-shadow: var(--shadow-button);
+  color: var(--ink);
+  font: inherit;
+  font-size: 13px;
+  letter-spacing: -0.01em;
+  white-space: nowrap;
+  cursor: pointer;
+  transition:
+    background-color var(--t) var(--ease-out),
+    color var(--t) var(--ease-out),
+    transform var(--t) var(--ease-out);
+}
+.btn:active {
+  transform: scale(var(--squeeze));
+}
+.btn:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+.btn kbd {
+  color: inherit;
+  opacity: 0.6;
+}
+.btn-primary {
+  background: var(--primary-bg);
+  color: var(--primary-fg);
+  box-shadow: 0 0 0 1px var(--primary-bg), var(--drop);
+}
+.btn-danger {
+  color: var(--accent-text);
+}
+@media (hover: hover) and (pointer: fine) {
+  .btn:hover {
+    background: var(--hover);
+  }
+  .btn-primary:hover {
+    background: var(--primary-hover);
+  }
+}

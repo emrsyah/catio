@@ -347,10 +347,10 @@ export function resolveWhen(p: Pick<ParsedLine, "date" | "time">, now: Date): Da
 }
 
 /** Open to-dos with a future date or time. Done and snoozed lines never fire. */
-export function collectReminders(lines: readonly string[], now: Date): Reminder[] {
+export function collectReminders(lines: readonly string[], now: Date, parsed?: readonly ParsedLine[]): Reminder[] {
   const out: Reminder[] = [];
   lines.forEach((text, i) => {
-    const p = parseLine(text);
+    const p = parsed?.[i] ?? parseLine(text);
     if (p.kind !== "todo" || (!p.time && !p.date)) return;
     const d = resolveWhen(p, now);
     if (!d) return;
@@ -394,6 +394,265 @@ export function describeWhen(text: string, p: ParsedLine, now: Date): { label: s
     diff === 0 ? "hari ini" : diff === 1 ? "besok" : diff === -1 ? "kemarin" : diff > 1 && diff < 7 ? DAY_SHORT[day.getDay()] : formatDay(day, now);
   const label = time ? (diff === 0 ? time : `${dayLabel} ${time}`) : dayLabel;
   return { label, overdue: diff < 0 };
+}
+
+// ---------- inline tokens: #tag, @orang, links, long numbers ----------
+
+export type InlineKind = "url" | "tag" | "person" | "number";
+export interface InlineToken {
+  kind: InlineKind;
+  from: number;
+  to: number;
+  /** tag/person without the sigil, the url, or the number's digits */
+  value: string;
+}
+
+// Links first: a "#" or "@" inside a URL is part of the URL. Trailing punctuation stays text.
+const URL_RE = /\b(?:https?:\/\/|www\.)[^\s<>"'`]*[^\s<>"'`.,;:!?)\]]/giu;
+// "#kerja" but not "a#b", "C#", "&#39;" or an anchor inside a URL (URLs are claimed first).
+const TAG_RE = /(?<![\p{L}\d_&#/])#([\p{L}][\p{L}\d_-]*)/gu;
+// "@dina" but not "dina@mail.com": a letter or digit right before "@" means an email.
+const PERSON_RE = /(?<![\p{L}\d_.@/])@([\p{L}][\p{L}\d_]*(?:[.-][\p{L}\d_]+)*)/gu;
+// Account and phone numbers: digits with spaces, dots or dashes, 8+ digits in total.
+const NUMBER_RE = /(?<![\p{L}\d:/.,-])\+?\d(?:[ .-]?\d){7,}(?![\p{L}\d:/])/gu;
+
+/** Links, tags, people and long numbers in `text`, sorted, never overlapping. */
+export function inlineTokens(text: string, start = 0): InlineToken[] {
+  const out: InlineToken[] = [];
+  const free = (from: number, to: number) => out.every((t) => to <= t.from || from >= t.to);
+  const scan = (re: RegExp, kind: InlineKind, value: (m: RegExpExecArray) => string) => {
+    re.lastIndex = start;
+    for (let m = re.exec(text); m; m = re.exec(text)) {
+      const from = m.index;
+      const to = from + m[0].length;
+      if (free(from, to)) out.push({ kind, from, to, value: value(m) });
+    }
+  };
+  // Cheap guards: most lines have none of these characters.
+  if (text.includes("http") || text.includes("www.")) scan(URL_RE, "url", (m) => m[0]);
+  if (text.includes("#")) scan(TAG_RE, "tag", (m) => m[1].toLowerCase());
+  if (text.includes("@")) scan(PERSON_RE, "person", (m) => m[1].toLowerCase());
+  if (/\d{2}/.test(text)) scan(NUMBER_RE, "number", (m) => m[0].replace(/[^\d+]/g, ""));
+  return out.sort((a, b) => a.from - b.from);
+}
+
+/** An address the opener may launch: http(s) only, "www." gets https. */
+export function linkHref(url: string): string | null {
+  const href = /^www\./i.test(url) ? `https://${url}` : url;
+  return /^https?:\/\/[^\s]+$/i.test(href) ? href : null;
+}
+
+// ---------- pasting a list ----------
+
+const BULLET = /^(\s*)(?:[-*•·–]|\d{1,2}[.)])\s+(?=\S)/;
+
+/**
+ * A pasted list (2+ bullet lines, e.g. from WhatsApp) as to-dos, or null when it isn't one.
+ * Never applied silently: the pad offers it after pasting the text as it was.
+ */
+export function listToTodos(text: string): string[] | null {
+  const lines = text.replace(/\r\n?/g, "\n").split("\n");
+  const filled = lines.filter((l) => l.trim() !== "");
+  if (filled.length < 2) return null;
+  let bullets = 0;
+  for (const l of filled) {
+    if (BULLET.test(l)) bullets++;
+    else if (!MARKER.test(l)) return null;
+  }
+  if (bullets < 2) return null;
+  return lines.map((l) => {
+    const m = BULLET.exec(l);
+    return m ? `${m[1]}[ ] ${l.slice(m[0].length)}` : l;
+  });
+}
+
+// ---------- line edits used by capture and review ----------
+
+/** Where a captured line lands: right under "---" (top of the rest), or at the end. */
+export function insertCaptured(lines: readonly string[], line: string): { lines: string[]; index: number } {
+  const out = [...lines];
+  const divider = out.findIndex((l) => DIVIDER.test(l));
+  if (divider >= 0) {
+    out.splice(divider + 1, 0, line);
+    return { lines: out, index: divider + 1 };
+  }
+  while (out.length && out[out.length - 1].trim() === "") out.pop();
+  out.push(line);
+  return { lines: out, index: out.length - 1 };
+}
+
+/** Moves a line to the end of the focus zone (just above "---"), or to the top without one. */
+export function moveToFocus(lines: readonly string[], index: number): { lines: string[]; index: number } {
+  const out = [...lines];
+  const [line] = out.splice(index, 1);
+  const divider = out.findIndex((l) => DIVIDER.test(l));
+  const at = divider >= 0 ? divider : 0;
+  out.splice(at, 0, line);
+  return { lines: out, index: at };
+}
+
+/** Sets the line's day to `day` ("29 nov"), replacing a date already written. */
+export function setDate(text: string, day: Date, now: Date): string {
+  const p = parseLine(text);
+  const label = formatDay(day, now);
+  if (p.date) return text.slice(0, p.date.from) + label + text.slice(p.date.to);
+  return `${text.trimEnd()} ${label}`;
+}
+
+// ---------- task age (kept outside the file) ----------
+
+/** Days counted from the 04:00 boundary, so a to-do written at 01:00 belongs to "yesterday". */
+export function dayNumber(now: Date): number {
+  const d = lastDayStart(now);
+  return Math.round(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()) / DAY_MS);
+}
+
+/**
+ * Identity of an open or snoozed to-do across edits that don't change its words: the body
+ * without marker, date and time, lowercased. "besok" → "23 nov" keeps the same key.
+ */
+export function taskKey(text: string, p: ParsedLine = parseLine(text)): string | null {
+  if (p.kind !== "todo" && p.kind !== "snooze") return null;
+  const key = stripWhen(text, p).toLowerCase();
+  return key || null;
+}
+
+/** first-seen day per task key */
+export type AgeBook = Record<string, number>;
+
+/**
+ * Records the day each open to-do was first seen and forgets the ones that are gone.
+ * Returns the same object when nothing changed (cheap equality for callers).
+ */
+export function updateAges(book: AgeBook, keys: Iterable<string>, now: Date): AgeBook {
+  const today = dayNumber(now);
+  const next: AgeBook = {};
+  let changed = false;
+  let count = 0;
+  for (const k of keys) {
+    if (k in next) continue;
+    next[k] = book[k] ?? today;
+    if (!(k in book)) changed = true;
+    count++;
+  }
+  if (!changed && count === Object.keys(book).length) return book;
+  return next;
+}
+
+/** "2 hari", "3 mgg": shown from two days on; younger to-dos stay quiet. */
+export function ageLabel(days: number): string | null {
+  if (days < 2) return null;
+  if (days < 14) return `${days} hari`;
+  return `${Math.floor(days / 7)} mgg`;
+}
+
+// ---------- search ----------
+
+export interface SearchSource {
+  /** pad name, or "arsip" */
+  source: string;
+  text: string;
+  archive?: boolean;
+}
+
+export interface IndexedLine {
+  source: string;
+  archive: boolean;
+  line: number;
+  text: string;
+  lower: string;
+  kind: LineKind;
+  dated: boolean;
+  tags: string[];
+}
+
+export type SearchFilter = { kind: "all" } | { kind: "open" } | { kind: "dated" } | { kind: "tag"; tag: string };
+
+export interface SearchHit {
+  item: IndexedLine;
+  /** match ranges inside item.text */
+  ranges: [number, number][];
+  score: number;
+}
+
+/** Parses every line once; search then only scans lowercase strings. */
+export function buildIndex(sources: readonly SearchSource[]): IndexedLine[] {
+  const out: IndexedLine[] = [];
+  for (const s of sources) {
+    const lines = s.text.split("\n");
+    for (let i = 0; i < lines.length; i++) {
+      const text = lines[i];
+      if (text.trim() === "" || text.startsWith("## ") || DIVIDER.test(text)) continue;
+      const p = parseLine(text);
+      const tags = text.includes("#") || text.includes("@")
+        ? inlineTokens(text, p.bodyFrom).filter((t) => t.kind === "tag" || t.kind === "person").map((t) => (t.kind === "tag" ? "#" : "@") + t.value)
+        : [];
+      out.push({
+        source: s.source,
+        archive: !!s.archive,
+        line: i,
+        text,
+        lower: text.toLowerCase(),
+        kind: p.kind,
+        dated: !!(p.date || p.time),
+        tags,
+      });
+    }
+  }
+  return out;
+}
+
+/** Every #tag and @orang in the index, most used first. */
+export function topTags(index: readonly IndexedLine[], limit = 6): string[] {
+  const n = new Map<string, number>();
+  for (const it of index) for (const t of it.tags) n.set(t, (n.get(t) ?? 0) + 1);
+  return [...n.entries()].sort((a, b) => b[1] - a[1] || (a[0] < b[0] ? -1 : 1)).slice(0, limit).map(([t]) => t);
+}
+
+/**
+ * All query words must appear in the line (any order). Open to-dos rank first, then notes,
+ * then finished and archived lines; word-start matches and the whole phrase rank higher.
+ */
+export function search(index: readonly IndexedLine[], query: string, filter: SearchFilter = { kind: "all" }, limit = 40): SearchHit[] {
+  const q = query.trim().toLowerCase();
+  const words = q ? [...new Set(q.split(/\s+/))] : [];
+  const hits: SearchHit[] = [];
+  for (const item of index) {
+    if (filter.kind === "open" && item.kind !== "todo") continue;
+    if (filter.kind === "dated" && !(item.dated && item.kind === "todo")) continue;
+    if (filter.kind === "tag" && !item.tags.includes(filter.tag)) continue;
+    let score = item.archive ? -4 : item.kind === "todo" ? 6 : item.kind === "text" ? 3 : item.kind === "snooze" ? 2 : 0;
+    const ranges: [number, number][] = [];
+    let ok = true;
+    for (const w of words) {
+      let at = item.lower.indexOf(w);
+      if (at < 0) {
+        ok = false;
+        break;
+      }
+      while (at >= 0) {
+        ranges.push([at, at + w.length]);
+        if (at === 0 || !/[\p{L}\d]/u.test(item.lower[at - 1])) score += 2;
+        at = item.lower.indexOf(w, at + w.length);
+      }
+    }
+    if (!ok) continue;
+    if (words.length > 1 && item.lower.includes(q)) score += 3;
+    ranges.sort((a, b) => a[0] - b[0]);
+    hits.push({ item, ranges: mergeRanges(ranges), score });
+  }
+  // Stable: equal scores keep pad order and line order.
+  return hits.sort((a, b) => b.score - a.score).slice(0, limit);
+}
+
+function mergeRanges(r: [number, number][]): [number, number][] {
+  const out: [number, number][] = [];
+  for (const x of r) {
+    const last = out[out.length - 1];
+    if (last && x[0] <= last[1]) last[1] = Math.max(last[1], x[1]);
+    else out.push([x[0], x[1]]);
+  }
+  return out;
 }
 
 /**

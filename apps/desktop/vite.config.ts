@@ -13,5 +13,9 @@ export default defineConfig({
   build: {
     target: "es2022",
     sourcemap: false,
+    // Two pages: the pad, and the quick-capture field (which loads only @catio/core).
+    rollupOptions: {
+      input: { main: "index.html", capture: "capture.html" },
+    },
   },
 });

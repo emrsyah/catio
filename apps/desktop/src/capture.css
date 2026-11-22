@@ -1,0 +1,112 @@
+/* Quick capture: an overlay surface (white in light, a step up in dark) filling the small
+   transparent window. One big field, a quiet line saying how it reads, key hints. */
+html,
+body {
+  margin: 0;
+  height: 100%;
+  overflow: hidden;
+  background: transparent;
+  color: var(--ink);
+  font-family: "Geist Variable", "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+.capture {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 16px 10px;
+  border-radius: 10px;
+  background: var(--surface-top);
+  box-shadow: inset 0 0 0 1px rgb(31 30 28 / 0.1);
+}
+@media (prefers-color-scheme: dark) {
+  .capture {
+    box-shadow: inset 0 0 0 0.5px #55524c;
+  }
+}
+
+.capture-target {
+  margin: 0;
+  font-size: 12px;
+  line-height: 16px;
+  color: var(--ink-2);
+}
+
+.capture-field {
+  width: 100%;
+  min-height: 28px;
+  padding: 2px 0;
+  border: 0;
+  outline: none;
+  resize: none;
+  background: transparent;
+  color: var(--ink);
+  font: inherit;
+  font-size: 16px;
+  line-height: 24px;
+  caret-color: var(--accent);
+}
+.capture-field::placeholder {
+  color: var(--ink-3);
+}
+.capture-field::selection {
+  background: var(--selection);
+}
+
+.capture-read {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  min-height: 20px;
+  font-size: 12px;
+}
+.capture-chip {
+  display: inline-flex;
+  align-items: center;
+  height: 20px;
+  padding: 0 8px;
+  border-radius: 10px;
+  background: var(--surface-top);
+  box-shadow: var(--shadow-button);
+  color: var(--ink);
+  white-space: nowrap;
+}
+.capture-chip.is-label,
+.capture-chip.is-hint {
+  padding: 0;
+  background: none;
+  box-shadow: none;
+  color: var(--ink-2);
+}
+.capture-chip.is-when {
+  background: var(--accent-soft);
+  box-shadow: none;
+  color: var(--accent-text);
+  font-variant-numeric: tabular-nums;
+}
+.capture-chip.is-muted {
+  color: var(--ink-2);
+}
+
+.capture-hints {
+  display: flex;
+  gap: 14px;
+  margin-top: auto;
+  font-size: 12px;
+  color: var(--ink-2);
+}
+.capture-hints kbd {
+  margin-right: 2px;
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}

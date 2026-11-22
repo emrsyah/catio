@@ -15,6 +15,19 @@ import {
   parseLine,
   resolveTime,
   toggleLine,
+  inlineTokens,
+  linkHref,
+  listToTodos,
+  insertCaptured,
+  moveToFocus,
+  setDate,
+  taskKey,
+  updateAges,
+  dayNumber,
+  ageLabel,
+  buildIndex,
+  search,
+  topTags,
 } from "../src/index.ts";
 
 test("markers", () => {
@@ -154,6 +167,81 @@ test("describeWhen and commitWhen", () => {
   assert.equal(commitWhen("[ ] call 25 nov", sun), null, "already absolute");
   assert.equal(commitWhen("[ ] invoice tgl 25", sun), "[ ] invoice 25 nov", "tgl N locks too");
   assert.equal(commitWhen("besok libur", sun), null, "notes are left alone");
+});
+
+test("inline tokens: tags, people, links, numbers", () => {
+  const kinds = (s: string) => inlineTokens(s).map((t) => `${t.kind}:${t.value}`);
+  assert.deepEqual(kinds("[ ] review PR #kerja @dina"), ["tag:kerja", "person:dina"]);
+  assert.deepEqual(kinds("mail dina@mail.com"), [], "email is not a person");
+  assert.deepEqual(kinds("lihat https://x.com/a#bagian ya"), ["url:https://x.com/a#bagian"], "# inside a URL");
+  assert.deepEqual(kinds("buka www.catio.app."), ["url:www.catio.app"], "trailing dot stays text");
+  assert.deepEqual(kinds("C# dan a#b"), [], "not tags");
+  assert.deepEqual(kinds("&#39; html"), []);
+  assert.deepEqual(kinds("rek Dina BCA 123 456 7890"), ["number:1234567890"]);
+  assert.deepEqual(kinds("PIC: mas Arif (0812-3456-7890)"), ["number:081234567890"]);
+  assert.deepEqual(kinds("budget 40jt, 15:00, 49rb/bln, 1.000.000"), [], "short numbers aren't copy targets");
+  assert.equal(linkHref("www.catio.app"), "https://www.catio.app");
+  assert.equal(linkHref("javascript:alert(1)"), null);
+});
+
+test("pasted lists become to-dos only when they are lists", () => {
+  assert.deepEqual(listToTodos("- cek harga vendor kaos\n- konfirmasi venue\n• bikin form RSVP"), [
+    "[ ] cek harga vendor kaos",
+    "[ ] konfirmasi venue",
+    "[ ] bikin form RSVP",
+  ]);
+  assert.deepEqual(listToTodos("1. satu\n2) dua"), ["[ ] satu", "[ ] dua"]);
+  assert.equal(listToTodos("- satu"), null, "one bullet is just a line");
+  assert.equal(listToTodos("halo\n- satu\n- dua"), null, "prose mixed in: leave it");
+  assert.equal(listToTodos("-5 derajat\n-3 derajat"), null, "negative numbers aren't bullets");
+});
+
+test("capture and review edits", () => {
+  const doc = ["[ ] a", "---", "[ ] b", ""];
+  assert.deepEqual(insertCaptured(doc, "[ ] baru"), { lines: ["[ ] a", "---", "[ ] baru", "[ ] b", ""], index: 2 });
+  assert.deepEqual(insertCaptured(["catatan", "", ""], "x"), { lines: ["catatan", "x"], index: 1 });
+  assert.deepEqual(moveToFocus(["[ ] a", "---", "[ ] b"], 2), { lines: ["[ ] a", "[ ] b", "---"], index: 1 });
+  assert.deepEqual(moveToFocus(["x", "[ ] b"], 1), { lines: ["[ ] b", "x"], index: 0 });
+  const sun = new Date(2026, 10, 22, 10, 0);
+  const next = new Date(2026, 10, 29);
+  assert.equal(setDate("[ ] bayar 20 nov jam 3", next, sun), "[ ] bayar 29 nov jam 3");
+  assert.equal(setDate("[ ] bayar", next, sun), "[ ] bayar 29 nov");
+});
+
+test("task age is kept by key and survives date rewrites", () => {
+  const d1 = new Date(2026, 10, 20, 10, 0);
+  const d4 = new Date(2026, 10, 23, 10, 0);
+  assert.equal(taskKey("[ ] Bayar listrik besok 15:00"), "bayar listrik");
+  assert.equal(taskKey("[ ] bayar listrik 23 nov 15:00"), "bayar listrik");
+  assert.equal(taskKey("[x] done"), null);
+  assert.equal(taskKey("[ ] "), null);
+  const b1 = updateAges({}, ["bayar listrik"], d1);
+  const b2 = updateAges(b1, ["bayar listrik"], d4);
+  assert.equal(b2, b1, "unchanged book is the same object");
+  assert.equal(dayNumber(d4) - b2["bayar listrik"], 3);
+  const b3 = updateAges(b2, ["baru"], d4);
+  assert.deepEqual(Object.keys(b3), ["baru"], "gone tasks are forgotten");
+  assert.equal(dayNumber(new Date(2026, 10, 23, 2, 0)), dayNumber(new Date(2026, 10, 22, 12, 0)), "before 04:00 is yesterday");
+  assert.equal(ageLabel(1), null);
+  assert.equal(ageLabel(5), "5 hari");
+  assert.equal(ageLabel(21), "3 mgg");
+});
+
+test("search ranks open to-dos and filters", () => {
+  const index = buildIndex([
+    { source: "catio", text: "[x] transfer DP venue\n[ ] konfirmasi venue sama Dina #kerja\n---\nlist venue buat gathering" },
+    { source: "ide", text: "[ ] call venue besok 15:00 @dina" },
+    { source: "arsip", text: "## 2026-11-20\n[x] venue lama", archive: true },
+  ]);
+  const hits = search(index, "venue");
+  assert.equal(hits.length, 5);
+  assert.equal(hits[0].item.kind, "todo");
+  assert.equal(hits[hits.length - 1].item.archive, true, "archive ranks last");
+  assert.deepEqual(search(index, "VENUE dina").map((h) => h.item.source), ["catio", "ide"], "all words, any case");
+  assert.deepEqual(search(index, "", { kind: "dated" }).map((h) => h.item.line), [0]);
+  assert.deepEqual(search(index, "", { kind: "tag", tag: "#kerja" }).length, 1);
+  assert.deepEqual(topTags(index), ["#kerja", "@dina"]);
+  assert.deepEqual(search(index, "venue sama")[0].ranges, [[15, 20], [21, 25]]);
 });
 
 function pick(t: { hour: number; minute: number; ambiguous: boolean } | null) {

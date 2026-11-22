@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="id">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Catio · tangkap cepat</title>
+  </head>
+  <body>
+    <form class="capture" id="capture" autocomplete="off">
+      <p class="capture-target" id="target">Masuk ke pad</p>
+      <label class="sr-only" for="field">Tulis to-do atau catatan</label>
+      <textarea id="field" class="capture-field" rows="1" spellcheck="false" placeholder="[] transfer DP ke Dina jumat"></textarea>
+      <div class="capture-read" id="read" aria-live="polite"></div>
+      <div class="capture-hints">
+        <span><kbd>↵</kbd> simpan &amp; tutup</span>
+        <span><kbd>Shift ↵</kbd> baris baru</span>
+        <span><kbd>Esc</kbd> tutup</span>
+      </div>
+    </form>
+    <script type="module" src="/src/capture.ts"></script>
+  </body>
+</html>

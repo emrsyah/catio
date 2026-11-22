@@ -15,8 +15,20 @@ import {
   placeholder,
 } from "@codemirror/view";
 import { defaultKeymap, history, historyKeymap, indentLess, indentMore, undo } from "@codemirror/commands";
+import { codeFolding, foldService, toggleFold } from "@codemirror/language";
 import { search, searchKeymap } from "@codemirror/search";
-import { commitWhen, describeWhen, parseLine, toggleLine, toggleSnooze } from "@catio/core";
+import {
+  ageLabel,
+  commitWhen,
+  describeWhen,
+  inlineTokens,
+  linkHref,
+  listToTodos,
+  parseLine,
+  taskKey,
+  toggleLine,
+  toggleSnooze,
+} from "@catio/core";
 
 export interface EditorHooks {
   onSave: () => void;
@@ -24,9 +36,18 @@ export interface EditorHooks {
   /** Bersihin removed these finished lines; `revert` puts them back if nothing changed since. */
   onCleaned: (lines: string[], revert: () => boolean) => void;
   onNothingToClean: () => void;
+  /** Days since a to-do (by taskKey) was first seen in this pad, or null when unknown. */
+  ageOf: (key: string) => number | null;
+  /** A number run was copied with a click. */
+  onCopied: (value: string) => void;
+  openUrl: (href: string) => void;
+  /** A list was pasted as-is; `apply` turns it into to-dos if nothing changed since. */
+  onPastedList: (count: number, apply: () => boolean) => void;
 }
 
 let currentHooks: EditorHooks;
+/** Rebuild decorations without a doc change (e.g. ages were updated after a save). */
+const redrawEffect = StateEffect.define<null>();
 
 // ---------- focus zone: lines above the first "---" ----------
 
@@ -34,20 +55,35 @@ interface Zone {
   divider: number; // 1-based line number, -1 when absent
   now: number; // 1-based line number of the first open to-do in focus, -1 when none
   allDone: boolean; // focus has tasks and none are open
+  /** Focus is empty: the first open to-do below the rule, offered to move up (-1 when none). */
+  promote: number;
 }
 
 function computeZone(state: EditorState): Zone {
   const doc = state.doc;
   let now = -1;
   let tasks = 0;
+  let filled = 0;
   // The focus zone is short by design, so this loop stops early on real documents.
   for (let n = 1; n <= doc.lines; n++) {
-    const p = parseLine(doc.line(n).text);
-    if (p.kind === "divider") return { divider: n, now, allDone: tasks > 0 && now === -1 };
+    const text = doc.line(n).text;
+    const p = parseLine(text);
+    if (p.kind === "divider") {
+      let promote = -1;
+      // Only an empty focus looks below the rule, and only until the first open to-do.
+      if (filled === 0) {
+        for (let k = n + 1; k <= doc.lines && promote === -1; k++) {
+          const q = doc.line(k).text;
+          if (parseLine(q).kind === "todo" && q.trim().length > 4) promote = k;
+        }
+      }
+      return { divider: n, now, allDone: tasks > 0 && now === -1, promote };
+    }
+    if (p.kind !== "blank") filled++;
     if (p.markerFrom >= 0) tasks++;
     if (now === -1 && p.kind === "todo") now = n;
   }
-  return { divider: -1, now: -1, allDone: false };
+  return { divider: -1, now: -1, allDone: false, promote: -1 };
 }
 
 // ---------- widgets ----------
@@ -96,34 +132,38 @@ const ACTIONS: Record<RightAction, { act: string; title: string }> = {
   besok: { act: "wake", title: "Balikin sekarang" },
 };
 
+function span(cls: string, text: string, title?: string) {
+  const s = document.createElement("span");
+  s.className = cls;
+  s.textContent = text;
+  if (title) s.title = title;
+  return s;
+}
+
 class RightWidget extends WidgetType {
   constructor(
     readonly time: string | null,
     readonly action: RightAction | null,
     readonly overdue = false,
+    /** "3 hari": how long an open to-do has been waiting */
+    readonly age: string | null = null,
   ) {
     super();
   }
   eq(o: RightWidget) {
-    return o.time === this.time && o.action === this.action && o.overdue === this.overdue;
+    return o.time === this.time && o.action === this.action && o.overdue === this.overdue && o.age === this.age;
   }
   toDOM() {
     const el = document.createElement("span");
     el.className = "cm-right";
     if (this.action) {
-      const a = document.createElement("span");
-      a.className = `cm-ract cm-ract-${this.action}`;
+      const a = span(`cm-ract cm-ract-${this.action}`, this.action, ACTIONS[this.action].title);
       a.dataset.act = ACTIONS[this.action].act;
-      a.textContent = this.action;
-      a.title = ACTIONS[this.action].title;
       el.appendChild(a);
     }
+    if (this.age) el.appendChild(span("cm-rage", this.age, `Belum beres sejak ${this.age} lalu`));
     if (this.time) {
-      const t = document.createElement("span");
-      t.className = this.overdue ? "cm-rtime is-overdue" : "cm-rtime";
-      if (this.overdue) t.title = "Lewat tanggal";
-      t.textContent = this.time;
-      el.appendChild(t);
+      el.appendChild(span(this.overdue ? "cm-rtime is-overdue" : "cm-rtime", this.time, this.overdue ? "Lewat tanggal" : undefined));
     }
     return el;
   }
@@ -132,27 +172,59 @@ class RightWidget extends WidgetType {
   }
 }
 
-/** Sits on the --- rule when every focus task is done: points at Bersihin. */
-class FocusDoneWidget extends WidgetType {
-  eq() {
-    return true;
+/**
+ * A short sentence on the --- rule with one link: "fokus beres · bersihin" when every focus
+ * task is done, "fokus kosong · naikin “…”" when there is nothing above the rule.
+ */
+class RuleWidget extends WidgetType {
+  constructor(
+    readonly lead: string,
+    readonly link: string,
+    readonly act: string,
+    readonly title: string,
+    readonly tail = "",
+  ) {
+    super();
+  }
+  eq(o: RuleWidget) {
+    return o.lead === this.lead && o.link === this.link && o.tail === this.tail;
   }
   toDOM() {
-    const el = document.createElement("span");
-    el.className = "cm-focusdone";
-    el.append("fokus beres · ");
-    const a = document.createElement("span");
-    a.className = "cm-ract cm-ract-link";
-    a.dataset.act = "clean";
-    a.textContent = "bersihin";
-    a.title = "Pindahin yang selesai ke arsip.md (Ctrl+Shift+Backspace)";
-    el.append(a, " buat mulai fokus baru");
+    const el = span("cm-focusdone", this.lead);
+    const a = span("cm-ract cm-ract-link", this.link, this.title);
+    a.dataset.act = this.act;
+    el.append(a, this.tail);
     return el;
   }
   ignoreEvent() {
     return false;
   }
 }
+
+/** Folded block: "4 baris", click to open. */
+function foldChip(_view: EditorView, onclick: (e: Event) => void, lines: number) {
+  const el = span("cm-foldchip", `${lines} baris`, "Buka (Ctrl+[)");
+  el.setAttribute("aria-label", `${lines} baris dilipat, klik buat buka`);
+  el.onclick = onclick;
+  return el;
+}
+
+/** An indented block under a line ("meeting klien:" + its lines) folds into that line. */
+const indentFold = foldService.of((state, from, to) => {
+  const doc = state.doc;
+  const head = doc.lineAt(from);
+  if (head.text.trim() === "" || head.number === doc.lines) return null;
+  const indentOf = (t: string) => t.length - t.trimStart().length;
+  const base = indentOf(head.text);
+  let end = -1;
+  for (let n = head.number + 1; n <= doc.lines; n++) {
+    const t = doc.line(n).text;
+    if (t.trim() === "") continue;
+    if (indentOf(t) <= base) break;
+    end = n;
+  }
+  return end === -1 ? null : { from: to, to: doc.line(end).to };
+});
 
 const boxes = {
   todo: Decoration.replace({ widget: new BoxWidget("todo") }),
@@ -162,8 +234,22 @@ const boxes = {
 /** Recognized date/time while you type: a chip, so you see it's been picked up. */
 const whenMark = Decoration.mark({ class: "cm-when", attributes: { title: "Pengingat ke-set" } });
 const hideToken = Decoration.replace({});
-const focusDoneDeco = Decoration.widget({ widget: new FocusDoneWidget(), side: 1 });
+const focusDoneDeco = Decoration.widget({
+  widget: new RuleWidget("fokus beres · ", "bersihin", "clean", "Pindahin yang selesai ke arsip.md (Ctrl+Shift+Backspace)", " buat mulai fokus baru"),
+  side: 1,
+});
 const line = (cls: string) => Decoration.line({ class: cls });
+/** Links, tags and copyable numbers: marks only, the text stays as typed. */
+const inlineMarks = {
+  url: Decoration.mark({ class: "cm-link", attributes: { title: "Ctrl+klik buat buka" } }),
+  tag: Decoration.mark({ class: "cm-tag" }),
+  person: Decoration.mark({ class: "cm-tag" }),
+  number: Decoration.mark({ class: "cm-copy", attributes: { title: "Klik buat salin" } }),
+};
+const promoteLabel = (text: string) => {
+  const body = text.slice(parseLine(text).bodyFrom).trim();
+  return `“${body.length > 28 ? body.slice(0, 27) + "…" : body}”`;
+};
 
 function activeLines(state: EditorState): Set<number> {
   const set = new Set<number>();
@@ -215,19 +301,35 @@ function buildDecorations(view: EditorView): DecorationSet {
           }
         }
       }
+      // Links, #tags, @people, long numbers: one cheap scan, skipped for lines without them.
+      for (const t of inlineTokens(ln.text, p.bodyFrom)) out.push(inlineMarks[t.kind].range(ln.from + t.from, ln.from + t.to));
+
       // An empty to-do gets no action: nothing to act on, and the caret would measure itself
       // against the absolutely-positioned widget and jump to the right edge.
       const empty = ln.text.slice(p.bodyFrom).trim() === "";
       const action: RightAction | null = empty
         ? null
         : p.kind === "todo" ? "nanti" : p.kind === "done" ? "hapus" : p.kind === "snooze" ? "besok" : null;
-      if (rightTime || action) {
-        classes.push("cm-has-right");
-        out.push(Decoration.widget({ widget: new RightWidget(rightTime, action, overdue), side: 1 }).range(ln.to));
+      let age: string | null = null;
+      if (p.kind === "todo" && !active.has(ln.number)) {
+        const key = taskKey(ln.text, p);
+        const days = key ? currentHooks.ageOf(key) : null;
+        age = days === null ? null : ageLabel(days);
       }
-      if (p.kind === "divider" && zone.allDone && ln.number === zone.divider) {
+      if (rightTime || action || age) {
+        classes.push("cm-has-right");
+        out.push(Decoration.widget({ widget: new RightWidget(rightTime, action, overdue, age), side: 1 }).range(ln.to));
+      }
+      if (p.kind === "divider" && ln.number === zone.divider && (zone.allDone || zone.promote !== -1)) {
         classes.push("cm-divider-label");
-        out.push(focusDoneDeco.range(ln.to));
+        out.push(
+          zone.allDone
+            ? focusDoneDeco.range(ln.to)
+            : Decoration.widget({
+                widget: new RuleWidget("fokus kosong · ", `naikin ${promoteLabel(view.state.doc.line(zone.promote).text)}`, "promote", "Pindahin ke atas garis"),
+                side: 1,
+              }).range(ln.to),
+        );
       }
       if (classes.length) out.push(line(classes.join(" ")).range(ln.from));
       pos = ln.to + 1;
@@ -246,7 +348,8 @@ const decorations = ViewPlugin.fromClass(
       this.lineStart = view.state.doc.lineAt(view.state.selection.main.head).from;
     }
     update(u: ViewUpdate) {
-      if (u.docChanged || u.viewportChanged || u.selectionSet) this.decorations = buildDecorations(u.view);
+      const forced = u.transactions.some((t) => t.effects.some((e) => e.is(redrawEffect)));
+      if (u.docChanged || u.viewportChanged || u.selectionSet || forced) this.decorations = buildDecorations(u.view);
       if (!u.docChanged && !u.selectionSet) return;
       const left = u.changes.mapPos(this.lineStart);
       const doc = u.state.doc;
@@ -277,9 +380,29 @@ const decorations = ViewPlugin.fromClass(
           e.preventDefault();
           const n = view.state.doc.lineAt(view.posAtDOM(act)).number;
           if (act.dataset.act === "clean") bersihin(view);
-          else if (act.dataset.act === "delete") deleteLineAt(view, n);
+          else if (act.dataset.act === "promote") {
+            const z = computeZone(view.state);
+            if (z.promote !== -1) moveLine(view, z.promote, z.divider);
+          } else if (act.dataset.act === "delete") deleteLineAt(view, n);
           else snoozeAt(view, [n]);
           return true;
+        }
+        // Ctrl+click opens a link; a plain click just places the caret (it's still text).
+        const link = target.closest<HTMLElement>(".cm-link");
+        if (link && (e.ctrlKey || e.metaKey)) {
+          const href = linkHref(link.textContent ?? "");
+          if (href) {
+            e.preventDefault();
+            currentHooks.openUrl(href);
+            return true;
+          }
+        }
+        // A number run copies itself on click; the caret still lands where you clicked.
+        const copy = target.closest<HTMLElement>(".cm-copy");
+        if (copy && !e.shiftKey) {
+          const value = copy.textContent ?? "";
+          navigator.clipboard.writeText(value).then(() => currentHooks.onCopied(value), console.error);
+          return false;
         }
         const box = target.closest<HTMLElement>(".cm-box");
         const lineEl = target.closest<HTMLElement>(".cm-line");
@@ -642,6 +765,25 @@ const zoomHandlers = EditorView.domEventHandlers({
     applyZoom(fontSize + (e.deltaY < 0 ? 1 : -1));
     return true;
   },
+  // Paste exactly what was copied. A list (WhatsApp "- a / - b") gets an offer, never a guess.
+  paste(e, view) {
+    const raw = e.clipboardData?.getData("text/plain");
+    if (!raw) return false;
+    const text = raw.replace(/\r\n?/g, "\n");
+    const todos = listToTodos(text);
+    if (!todos) return false;
+    e.preventDefault();
+    const { from } = view.state.selection.main;
+    view.dispatch(view.state.replaceSelection(text), { userEvent: "input.paste", scrollIntoView: true });
+    const after = view.state.doc;
+    const converted = todos.join("\n");
+    currentHooks.onPastedList(todos.filter((l) => l.trim()).length, () => {
+      if (view.state.doc !== after) return false;
+      view.dispatch({ changes: { from, to: from + text.length, insert: converted }, userEvent: "input.paste" });
+      return true;
+    });
+    return true;
+  },
 });
 
 // ---------- assembly ----------
@@ -660,6 +802,8 @@ export function createEditor(parent: HTMLElement, doc: string, hooks: EditorHook
     { key: "Mod-+", run: () => applyZoom(fontSize + 1) },
     { key: "Mod--", run: () => applyZoom(fontSize - 1) },
     { key: "Mod-0", run: () => applyZoom(BASE) },
+    // Ctrl+[ folds or opens the indented block under the caret's line (instant, no motion).
+    { key: "Mod-[", run: toggleFold, preventDefault: true },
   ]);
   // Layered Esc: the search panel handles its own Esc first; then clear selection; then hide.
   const escKeymap = keymap.of([
@@ -686,6 +830,11 @@ export function createEditor(parent: HTMLElement, doc: string, hooks: EditorHook
     search({ top: true }),
     placeholder("tulis apa aja. [] buat to-do, --- buat batas fokus"),
     lineStartInput,
+    indentFold,
+    codeFolding({
+      preparePlaceholder: (state, r) => state.doc.lineAt(r.to).number - state.doc.lineAt(r.from).number,
+      placeholderDOM: foldChip,
+    }),
     decorations,
     dragSource,
     landed,
@@ -702,10 +851,40 @@ export function createEditor(parent: HTMLElement, doc: string, hooks: EditorHook
 }
 
 let currentExtensions: Extension[] = [];
+/** Each pad's last editor state, so undo history and the caret survive switching away and back. */
+const padStates = new Map<string, EditorState>();
 
-/** Opens another pad's text with a fresh state: own undo history, caret at the top. */
-export function loadDoc(view: EditorView, text: string) {
-  view.setState(EditorState.create({ doc: text, extensions: currentExtensions }));
+/**
+ * Shows another pad. The state it had is reused while its text is unchanged (own undo
+ * history, caret where you left it); otherwise it opens fresh with the caret at the top.
+ */
+export function loadDoc(view: EditorView, text: string, leaving?: string, entering?: string) {
+  if (leaving) padStates.set(leaving, view.state);
+  const kept = entering ? padStates.get(entering) : undefined;
+  view.setState(kept && kept.doc.toString() === text ? kept : EditorState.create({ doc: text, extensions: currentExtensions }));
+}
+
+/** A renamed or deleted pad's state is dropped (or moved to its new name). */
+export function renameDocState(old: string, next: string | null) {
+  const s = padStates.get(old);
+  padStates.delete(old);
+  if (s && next) padStates.set(next, s);
+}
+
+export function redraw(view: EditorView) {
+  view.dispatch({ effects: redrawEffect.of(null) });
+}
+
+/** Ctrl+. : everything but the line you're on now dims (pure CSS on the editor root). */
+export function setFocusMode(view: EditorView, on: boolean) {
+  view.dom.classList.toggle("cm-focusmode", on);
+}
+
+/** Caret to the end of a 0-based line, scrolled into view. */
+export function goToLine(view: EditorView, index: number) {
+  const n = Math.min(Math.max(1, index + 1), view.state.doc.lines);
+  view.dispatch({ selection: { anchor: view.state.doc.line(n).to }, scrollIntoView: true });
+  view.focus();
 }
 
 /** Replace the document with minimal changes so the cursor stays where it was. */

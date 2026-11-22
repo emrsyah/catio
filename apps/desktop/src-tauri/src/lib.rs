@@ -1,3 +1,4 @@
+mod capture;
 mod doc;
 mod dock;
 mod pad;
@@ -16,7 +17,11 @@ use tauri_plugin_window_state::StateFlags;
 use doc::DocState;
 use reminders::{Reminder, Reminders};
 
-const HOTKEY: &str = "ctrl+alt+n";
+/// Global shortcuts: (accelerator, how it's written in messages, action).
+const HOTKEYS: [(&str, &str, fn(&AppHandle)); 2] = [
+    ("ctrl+alt+n", "Ctrl+Alt+N", pad::toggle),
+    ("alt+shift+space", "Alt+Shift+Space", capture::toggle),
+];
 
 #[derive(Serialize)]
 struct Loaded {
@@ -108,6 +113,48 @@ fn save_doc(doc: State<DocState>, pad: String, text: String) -> Result<(), Strin
 }
 
 #[tauri::command]
+fn read_pad(doc: State<DocState>, name: String) -> Result<String, String> {
+    doc.read(&name).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn read_archive(doc: State<DocState>) -> String {
+    doc.read_archive()
+}
+
+/// arsip.md in the default editor (search results from the archive open there).
+#[tauri::command]
+fn open_archive(app: AppHandle, doc: State<DocState>) -> Result<(), String> {
+    app.opener().open_path(doc.archive_path().display().to_string(), None::<&str>).map_err(|e| e.to_string())
+}
+
+/// Ctrl+click on a link. http(s) only: nothing else in a note may launch a program.
+#[tauri::command]
+fn open_url(app: AppHandle, url: String) -> Result<(), String> {
+    let lower = url.to_ascii_lowercase();
+    if !(lower.starts_with("https://") || lower.starts_with("http://")) || url.chars().any(char::is_whitespace) {
+        return Err("bukan link http(s)".into());
+    }
+    app.opener().open_url(url, None::<&str>).map_err(|e| e.to_string())
+}
+
+/// The pad a captured line goes to (shown in the capture window).
+#[tauri::command]
+fn capture_target(doc: State<DocState>) -> String {
+    doc.active()
+}
+
+/// The webview owns the "fade when idle" choice (localStorage); the tray checkbox mirrors it.
+struct IdleMenu(CheckMenuItem<tauri::Wry>);
+
+#[tauri::command]
+fn sync_idle_menu(app: AppHandle, on: bool) {
+    if let Some(item) = app.try_state::<IdleMenu>() {
+        let _ = item.0.set_checked(on);
+    }
+}
+
+#[tauri::command]
 fn save_conflict_copy(doc: State<DocState>, text: String) -> Result<String, String> {
     doc.save_conflict_copy(&text).map(|p| p.display().to_string()).map_err(|e| e.to_string())
 }
@@ -151,6 +198,8 @@ pub fn run() {
             tauri_plugin_window_state::Builder::default()
                 // Position and size only. Visibility is ours: the pad boots hidden.
                 .with_state_flags(StateFlags::all() & !StateFlags::VISIBLE)
+                // The capture field always opens centered.
+                .with_denylist(&[capture::LABEL])
                 .build(),
         )
         .plugin(tauri_plugin_autostart::init(MacosLauncher::LaunchAgent, Some(vec!["--hidden"])))
@@ -175,7 +224,7 @@ pub fn run() {
                 dock::fix_startup_size(&w);
             }
 
-            register_hotkey(&handle);
+            register_hotkeys(&handle);
             build_tray(&handle)?;
 
             #[cfg(not(debug_assertions))]
@@ -193,10 +242,14 @@ pub fn run() {
             Ok(())
         })
         .on_window_event(|window, event| {
-            // Alt+F4 or the close button hides; quitting lives in the tray.
+            // Alt+F4 or the close button hides that window; quitting lives in the tray.
             if let WindowEvent::CloseRequested { api, .. } = event {
                 api.prevent_close();
-                pad::hide(window.app_handle());
+                if window.label() == capture::LABEL {
+                    capture::hide(window.app_handle());
+                } else {
+                    pad::hide(window.app_handle());
+                }
             }
         })
         .invoke_handler(tauri::generate_handler![
@@ -216,33 +269,46 @@ pub fn run() {
             create_pad,
             rename_pad,
             delete_pad,
-            restore_pad
+            restore_pad,
+            read_pad,
+            read_archive,
+            open_archive,
+            open_url,
+            capture_target,
+            sync_idle_menu,
+            capture::capture_submit,
+            capture::capture_close
         ])
         .run(tauri::generate_context!())
         .expect("error while running Catio");
 }
 
-fn register_hotkey(app: &AppHandle) {
-    let result = app.global_shortcut().on_shortcut(HOTKEY, |app, _shortcut, event| {
-        if event.state == ShortcutState::Pressed {
-            pad::toggle(app);
+fn register_hotkeys(app: &AppHandle) {
+    for (key, name, action) in HOTKEYS {
+        let result = app.global_shortcut().on_shortcut(key, move |app, _shortcut, event| {
+            if event.state == ShortcutState::Pressed {
+                action(app);
+            }
+        });
+        if let Err(e) = result {
+            eprintln!("hotkey {key} unavailable: {e}");
+            let _ = app
+                .notification()
+                .builder()
+                .title(format!("{name} udah dipakai aplikasi lain"))
+                .body("Pakai menu Catio di tray buat sementara. Ganti hotkey nyusul di v0.1.")
+                .show();
         }
-    });
-    if let Err(e) = result {
-        eprintln!("hotkey {HOTKEY} unavailable: {e}");
-        let _ = app
-            .notification()
-            .builder()
-            .title("Ctrl+Alt+N udah dipakai aplikasi lain")
-            .body("Buka pad dari ikon Catio di tray. Ganti hotkey nyusul di v0.1.")
-            .show();
     }
 }
 
 fn build_tray(app: &AppHandle) -> tauri::Result<()> {
     let show = MenuItem::with_id(app, "show", "Buka pad  (Ctrl+Alt+N)", true, None::<&str>)?;
+    let capture_item = MenuItem::with_id(app, "capture", "Tangkap cepat  (Alt+Shift+Space)", true, None::<&str>)?;
     let dock_item = CheckMenuItem::with_id(app, "dock", "Mode dock (pojok kanan bawah)", true, false, None::<&str>)?;
     app.manage(DockMenu(dock_item.clone()));
+    let idle = CheckMenuItem::with_id(app, "idle", "Tipis pas nggak dipakai", true, true, None::<&str>)?;
+    app.manage(IdleMenu(idle.clone()));
     let protect = CheckMenuItem::with_id(app, "protect", "Sembunyiin dari share screen", true, !cfg!(debug_assertions), None::<&str>)?;
     let autostart_on = app.autolaunch().is_enabled().unwrap_or(false);
     let autostart = CheckMenuItem::with_id(app, "autostart", "Jalan waktu Windows nyala", true, autostart_on, None::<&str>)?;
@@ -251,9 +317,13 @@ fn build_tray(app: &AppHandle) -> tauri::Result<()> {
     let quit = MenuItem::with_id(app, "quit", "Keluar", true, None::<&str>)?;
     let sep = PredefinedMenuItem::separator(app)?;
     let sep2 = PredefinedMenuItem::separator(app)?;
-    let menu = Menu::with_items(app, &[&show, &dock_item, &sep, &protect, &autostart, &folder, &move_folder, &sep2, &quit])?;
+    let menu = Menu::with_items(
+        app,
+        &[&show, &capture_item, &dock_item, &sep, &idle, &protect, &autostart, &folder, &move_folder, &sep2, &quit],
+    )?;
 
     let protect_item = protect.clone();
+    let idle_item = idle.clone();
     let autostart_item = autostart.clone();
     let mut tray = TrayIconBuilder::with_id("catio")
         .tooltip("Catio")
@@ -261,6 +331,10 @@ fn build_tray(app: &AppHandle) -> tauri::Result<()> {
         .show_menu_on_left_click(false)
         .on_menu_event(move |app, event| match event.id.as_ref() {
             "show" => pad::show(app),
+            "capture" => capture::show(app),
+            "idle" => {
+                let _ = app.emit("idle-fade", idle_item.is_checked().unwrap_or(true));
+            }
             "dock" => {
                 // The webview persists the choice and calls set_dock, so both paths stay in sync.
                 let on = !dock::is_docked();
