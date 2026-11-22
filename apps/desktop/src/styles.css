@@ -614,10 +614,17 @@ body {
   color: var(--ink-3);
 }
 
-.cm-time {
-  font-family: "Geist Mono Variable", ui-monospace, monospace;
-  font-size: 0.92em;
-  color: var(--ink-2);
+/* A recognized date/time on the line you're typing: tinted chip, no layout shift
+   (the padding is a box-shadow), so it lights up the moment it's understood. */
+.cm-when {
+  background: var(--accent-soft);
+  box-shadow: 0 0 0 2px var(--accent-soft);
+  border-radius: 3px;
+  color: var(--accent-text);
+  font-variant-numeric: tabular-nums;
+  transition:
+    background-color var(--t) var(--ease-out),
+    box-shadow var(--t) var(--ease-out);
 }
 
 /* Right gutter: time and the action ("nanti" / "hapus" / "besok"). */
@@ -641,6 +648,10 @@ body {
 }
 .cm-done .cm-rtime {
   color: var(--ink-3);
+}
+/* An open to-do whose day has passed. Text label, not only colour: "kemarin" / "20 nov". */
+.cm-rtime.is-overdue {
+  color: var(--accent-text);
 }
 .cm-ract {
   color: var(--ink-2);

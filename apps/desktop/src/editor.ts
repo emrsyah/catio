@@ -16,7 +16,7 @@ import {
 } from "@codemirror/view";
 import { defaultKeymap, history, historyKeymap, indentLess, indentMore, undo } from "@codemirror/commands";
 import { search, searchKeymap } from "@codemirror/search";
-import { parseLine, toggleLine, toggleSnooze } from "@catio/core";
+import { commitWhen, describeWhen, parseLine, toggleLine, toggleSnooze } from "@catio/core";
 
 export interface EditorHooks {
   onSave: () => void;
@@ -100,11 +100,12 @@ class RightWidget extends WidgetType {
   constructor(
     readonly time: string | null,
     readonly action: RightAction | null,
+    readonly overdue = false,
   ) {
     super();
   }
   eq(o: RightWidget) {
-    return o.time === this.time && o.action === this.action;
+    return o.time === this.time && o.action === this.action && o.overdue === this.overdue;
   }
   toDOM() {
     const el = document.createElement("span");
@@ -119,7 +120,8 @@ class RightWidget extends WidgetType {
     }
     if (this.time) {
       const t = document.createElement("span");
-      t.className = "cm-rtime";
+      t.className = this.overdue ? "cm-rtime is-overdue" : "cm-rtime";
+      if (this.overdue) t.title = "Lewat tanggal";
       t.textContent = this.time;
       el.appendChild(t);
     }
@@ -157,7 +159,8 @@ const boxes = {
   done: Decoration.replace({ widget: new BoxWidget("done") }),
   snooze: Decoration.replace({ widget: new BoxWidget("snooze") }),
 };
-const timeMark = Decoration.mark({ class: "cm-time" });
+/** Recognized date/time while you type: a chip, so you see it's been picked up. */
+const whenMark = Decoration.mark({ class: "cm-when", attributes: { title: "Pengingat ke-set" } });
 const hideToken = Decoration.replace({});
 const focusDoneDeco = Decoration.widget({ widget: new FocusDoneWidget(), side: 1 });
 const line = (cls: string) => Decoration.line({ class: cls });
@@ -194,15 +197,22 @@ function buildDecorations(view: EditorView): DecorationSet {
         out.push(boxes[p.kind].range(ln.from + p.markerFrom, ln.from + p.bodyFrom));
       }
 
-      // Time moves to the right gutter, except on the line you're editing (raw text is clearer there).
+      // Date and time move to the right gutter as one label ("besok 15:00"), except on the
+      // line you're editing: there they stay in the text as chips.
       let rightTime: string | null = null;
-      if (p.time) {
+      let overdue = false;
+      const tokens = [p.date, p.time].filter((t) => t !== null).sort((a, b) => a.from - b.from);
+      if (tokens.length) {
         if (active.has(ln.number)) {
-          out.push(timeMark.range(ln.from + p.time.from, ln.from + p.time.to));
+          for (const t of tokens) out.push(whenMark.range(ln.from + t.from, ln.from + t.to));
         } else {
-          rightTime = ln.text.slice(p.time.from, p.time.to);
-          const start = p.time.from > 0 && ln.text[p.time.from - 1] === " " ? p.time.from - 1 : p.time.from;
-          out.push(hideToken.range(ln.from + start, ln.from + p.time.to));
+          const w = describeWhen(ln.text, p, new Date());
+          rightTime = w?.label ?? null;
+          overdue = !!w?.overdue && p.kind === "todo";
+          for (const t of tokens) {
+            const start = t.from > 0 && ln.text[t.from - 1] === " " ? t.from - 1 : t.from;
+            out.push(hideToken.range(ln.from + start, ln.from + t.to));
+          }
         }
       }
       // An empty to-do gets no action: nothing to act on, and the caret would measure itself
@@ -213,7 +223,7 @@ function buildDecorations(view: EditorView): DecorationSet {
         : p.kind === "todo" ? "nanti" : p.kind === "done" ? "hapus" : p.kind === "snooze" ? "besok" : null;
       if (rightTime || action) {
         classes.push("cm-has-right");
-        out.push(Decoration.widget({ widget: new RightWidget(rightTime, action), side: 1 }).range(ln.to));
+        out.push(Decoration.widget({ widget: new RightWidget(rightTime, action, overdue), side: 1 }).range(ln.to));
       }
       if (p.kind === "divider" && zone.allDone && ln.number === zone.divider) {
         classes.push("cm-divider-label");
@@ -229,11 +239,25 @@ function buildDecorations(view: EditorView): DecorationSet {
 const decorations = ViewPlugin.fromClass(
   class {
     decorations: DecorationSet;
+    /** Start of the line the caret was on, to notice when you leave it. */
+    lineStart: number;
     constructor(view: EditorView) {
       this.decorations = buildDecorations(view);
+      this.lineStart = view.state.doc.lineAt(view.state.selection.main.head).from;
     }
     update(u: ViewUpdate) {
       if (u.docChanged || u.viewportChanged || u.selectionSet) this.decorations = buildDecorations(u.view);
+      if (!u.docChanged && !u.selectionSet) return;
+      const left = u.changes.mapPos(this.lineStart);
+      const doc = u.state.doc;
+      const now = doc.lineAt(u.state.selection.main.head).from;
+      const leftLine = doc.lineAt(Math.min(left, doc.length));
+      this.lineStart = now;
+      // Left a line: lock its "besok" / "2 jam lagi" into absolute words (can't dispatch mid-update).
+      if (leftLine.from !== now) {
+        const at = leftLine.from;
+        queueMicrotask(() => commitLineAt(u.view, at));
+      }
     }
   },
   {
@@ -428,6 +452,21 @@ function moveLine(view: EditorView, source: number, insertBefore: number) {
   view.dispatch({ selection: { anchor: ln.to }, effects: setLanded.of(index + 1) });
   view.focus();
   window.setTimeout(() => view.dispatch({ effects: setLanded.of(null) }), LANDED_MS);
+}
+
+/** Rewrites relative dates/times on the line at `pos` to absolute ones (see commitWhen). */
+function commitLineAt(view: EditorView, pos: number) {
+  if (pos > view.state.doc.length) return;
+  const ln = view.state.doc.lineAt(pos);
+  const next = commitWhen(ln.text, new Date());
+  if (next !== null && next !== ln.text) {
+    view.dispatch({ changes: { from: ln.from, to: ln.to, insert: next }, userEvent: "input.when" });
+  }
+}
+
+/** Before the pad hides or loses focus: lock the line you're still on, too. */
+export function commitActiveLine(view: EditorView) {
+  commitLineAt(view, view.state.selection.main.head);
 }
 
 /** "hapus" on a finished to-do: the line goes away (Ctrl+Z brings it back). */

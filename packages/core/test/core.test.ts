@@ -2,6 +2,10 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
   collectReminders,
+  commitWhen,
+  describeWhen,
+  resolveDate,
+  resolveWhen,
   focusDone,
   lastDayStart,
   toggleSnooze,
@@ -81,6 +85,64 @@ test("snooze, wake at 04:00, focus done", () => {
   assert.equal(focusDone(parseDoc(["[x] a", "[>] b", "---", "[ ] c"])), true);
   assert.equal(focusDone(parseDoc(["[x] a", "[ ] b", "---"])), false);
   assert.equal(focusDone(parseDoc(["catatan", "---"])), false);
+});
+
+test("dates: relative, weekday, absolute", () => {
+  const sun = new Date(2026, 10, 22, 10, 0); // Sunday 22 Nov 2026, 10:00
+  const day = (line: string) => {
+    const d = parseLine(line).date;
+    const r = d && resolveDate(d, sun);
+    return r && `${r.getDate()}/${r.getMonth() + 1}/${r.getFullYear()}`;
+  };
+  assert.equal(day("[ ] bayar besok"), "23/11/2026");
+  assert.equal(day("[ ] bayar bsk"), "23/11/2026");
+  assert.equal(day("[ ] bayar lusa"), "24/11/2026");
+  assert.equal(day("[ ] call senin"), "23/11/2026");
+  assert.equal(day("[ ] call jumat"), "27/11/2026");
+  assert.equal(day("[ ] call hari minggu"), "29/11/2026");
+  assert.equal(parseLine("[ ] review 2 minggu").date, null, "bare minggu means week");
+  assert.equal(day("[ ] review minggu depan"), "29/11/2026");
+  assert.equal(day("[ ] kirim 3 hari lagi"), "25/11/2026");
+  assert.equal(day("[ ] invoice 25 nov"), "25/11/2026");
+  assert.equal(day("[ ] invoice 5 januari"), "5/1/2027", "January already passed → next year");
+  assert.equal(day("[ ] invoice 20 nov"), "20/11/2026", "recent past stays (overdue)");
+  assert.equal(day("[ ] invoice 25/12"), "25/12/2026");
+  assert.equal(day("[ ] invoice tgl 5"), "5/12/2026", "day passed this month → next month");
+  assert.equal(parseLine("[ ] seninnya").date, null);
+  assert.equal(parseLine("[ ] versi 1/2/3/4").date, null);
+});
+
+test("resolveWhen combines day and time", () => {
+  const sun = new Date(2026, 10, 22, 10, 0);
+  const at = (line: string) => {
+    const d = resolveWhen(parseLine(line), sun);
+    return d && `${d.getDate()} ${d.getHours()}:${String(d.getMinutes()).padStart(2, "0")}`;
+  };
+  assert.equal(at("[ ] call besok 15:00"), "23 15:00");
+  assert.equal(at("[ ] call besok jam 3"), "23 15:00");
+  assert.equal(at("[ ] call besok jam 9"), "23 9:00");
+  assert.equal(at("[ ] call besok"), "23 9:00", "day only → 09:00");
+  assert.equal(at("[ ] call 2 jam lagi"), "22 12:00");
+  assert.equal(at("[ ] call 30 menit lagi"), "22 10:30");
+  assert.equal(at("[ ] call setengah jam lagi"), "22 10:30");
+  assert.equal(at("[ ] call hari ini"), null);
+  assert.equal(at("[ ] call 20 nov 15:00"), null, "passed");
+  const r = collectReminders(["[ ] bayar listrik besok jam 3"], sun);
+  assert.equal(r[0].label, "bayar listrik");
+});
+
+test("describeWhen and commitWhen", () => {
+  const sun = new Date(2026, 10, 22, 10, 0);
+  const desc = (line: string) => describeWhen(line, parseLine(line), sun);
+  assert.deepEqual(desc("[ ] a 15:00"), { label: "15:00", overdue: false });
+  assert.deepEqual(desc("[ ] a besok 15:00"), { label: "besok 15:00", overdue: false });
+  assert.deepEqual(desc("[ ] a 25 nov"), { label: "rab", overdue: false });
+  assert.deepEqual(desc("[ ] a 10 des"), { label: "10 des", overdue: false });
+  assert.deepEqual(desc("[ ] a 20 nov"), { label: "20 nov", overdue: true });
+  assert.equal(commitWhen("[ ] bayar besok jam 3", sun), "[ ] bayar 23 nov jam 3");
+  assert.equal(commitWhen("[ ] call 2 jam lagi", sun), "[ ] call 12:00");
+  assert.equal(commitWhen("[ ] call 25 nov", sun), null, "already absolute");
+  assert.equal(commitWhen("besok libur", sun), null, "notes are left alone");
 });
 
 function pick(t: { hour: number; minute: number; ambiguous: boolean } | null) {

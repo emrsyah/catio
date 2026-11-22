@@ -8,7 +8,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { collectReminders, lastDayStart, wakeSnoozed } from "@catio/core";
-import { createEditor, replaceDoc } from "./editor";
+import { commitActiveLine, createEditor, replaceDoc } from "./editor";
 
 type ResizeDirection = Parameters<ReturnType<typeof getCurrentWindow>["startResizeDragging"]>[0];
 
@@ -409,7 +409,10 @@ async function boot() {
   });
 
   // Never lose the last keystrokes when the window is hidden or the app quits.
-  window.addEventListener("blur", () => dirty && void save());
+  window.addEventListener("blur", () => {
+    commitActiveLine(view); // "besok" on the line you're still on becomes a real date
+    if (dirty) void save();
+  });
   window.addEventListener("beforeunload", () => dirty && void save());
 }
 

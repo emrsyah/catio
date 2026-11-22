@@ -9,7 +9,27 @@ export interface TimeToken {
   minute: number;
   /** true for "jam N" without minutes or AM/PM context: 3 could mean 03:00 or 15:00. */
   ambiguous: boolean;
+  /** "2 jam lagi" / "30 menit lagi": minutes from now. hour/minute are unused then. */
+  relMinutes?: number;
   /** character offsets inside the line */
+  from: number;
+  to: number;
+}
+
+/**
+ * A day written in the line. Relative forms ("besok", "senin", "3 hari lagi") drift as days
+ * pass, so the editor rewrites them to an absolute "23 nov" once you leave the line.
+ */
+export interface DateToken {
+  kind: "offset" | "weekday" | "abs";
+  /** offset: days from today */
+  days?: number;
+  /** weekday: 0 = Sunday … 6 = Saturday, next occurrence after today */
+  weekday?: number;
+  /** abs: day of month, month 0-11 (absent for "tgl 25"), optional year */
+  day?: number;
+  month?: number;
+  year?: number;
   from: number;
   to: number;
 }
@@ -22,6 +42,7 @@ export interface ParsedLine {
   /** offset right after the marker and its trailing space */
   bodyFrom: number;
   time: TimeToken | null;
+  date: DateToken | null;
 }
 
 export interface ParsedDoc {
@@ -36,13 +57,87 @@ const MARKER = /^(\s*)\[( |x|X|>)\](?: |$)/;
 const DIVIDER = /^\s*---\s*$/;
 const CLOCK = /(?<![\d:])([01]?\d|2[0-3])[:.]([0-5]\d)(?![\d:])/;
 const JAM = /\bjam\s+(\d{1,2})(?:[:.]([0-5]\d))?\b/i;
+const REL_TIME = /(?<![\p{L}\d])(?:(\d{1,3})\s*(jam|menit|mnt)|(setengah)\s+jam)\s+lagi(?![\p{L}])/iu;
+
+const MONTHS: Record<string, number> = {
+  jan: 0, januari: 0, january: 0,
+  feb: 1, februari: 1, february: 1,
+  mar: 2, maret: 2, march: 2,
+  apr: 3, april: 3,
+  mei: 4, may: 4,
+  jun: 5, juni: 5, june: 5,
+  jul: 6, juli: 6, july: 6,
+  agu: 7, agt: 7, agustus: 7, aug: 7, august: 7,
+  sep: 8, sept: 8, september: 8,
+  okt: 9, oktober: 9, oct: 9, october: 9,
+  nov: 10, november: 10,
+  des: 11, desember: 11, dec: 11, december: 11,
+};
+const MONTH_SHORT = ["jan", "feb", "mar", "apr", "mei", "jun", "jul", "agu", "sep", "okt", "nov", "des"];
+const DAY_SHORT = ["min", "sen", "sel", "rab", "kam", "jum", "sab"];
+const WEEKDAYS: Record<string, number> = { senin: 1, selasa: 2, rabu: 3, kamis: 4, jumat: 5, "jum'at": 5, sabtu: 6, minggu: 0 };
+const MONTH_ALT = Object.keys(MONTHS).sort((a, b) => b.length - a.length).join("|");
+
+type DateRule = { re: RegExp; make: (m: RegExpExecArray) => Omit<DateToken, "from" | "to"> | null };
+const DATE_RULES: DateRule[] = [
+  {
+    // 25 nov, 25 november 2026
+    re: new RegExp(`(?<![\\d\\p{L}])(\\d{1,2})\\s+(${MONTH_ALT})\\.?(?:\\s+(\\d{4}))?(?![\\p{L}\\d])`, "iu"),
+    make: (m) => ({ kind: "abs", day: +m[1], month: MONTHS[m[2].toLowerCase()], year: m[3] ? +m[3] : undefined }),
+  },
+  {
+    // 25/11, 25/11/2026
+    re: /(?<![\d/])(\d{1,2})\/(\d{1,2})(?:\/(\d{4}|\d{2}))?(?![\d/])/,
+    make: (m) =>
+      +m[2] >= 1 && +m[2] <= 12
+        ? { kind: "abs", day: +m[1], month: +m[2] - 1, year: m[3] ? (m[3].length === 2 ? 2000 + +m[3] : +m[3]) : undefined }
+        : null,
+  },
+  {
+    // tgl 25, tanggal 25
+    re: /(?<![\p{L}])(?:tgl|tanggal)\.?\s+(\d{1,2})(?!\d)/iu,
+    make: (m) => ({ kind: "abs", day: +m[1] }),
+  },
+  {
+    re: /(?<![\p{L}])(hari ini|hr ini|besok|bsk|lusa)(?![\p{L}])/iu,
+    make: (m) => ({ kind: "offset", days: { besok: 1, bsk: 1, lusa: 2 }[m[1].toLowerCase()] ?? 0 }),
+  },
+  {
+    re: /(?<![\p{L}\d])(\d{1,2})\s+hari\s+lagi(?![\p{L}])/iu,
+    make: (m) => ({ kind: "offset", days: +m[1] }),
+  },
+  {
+    re: /(?<![\p{L}])minggu\s+depan(?![\p{L}])/iu,
+    make: () => ({ kind: "offset", days: 7 }),
+  },
+  {
+    // senin … sabtu, "hari minggu" (bare "minggu" also means "week"), optional "depan"
+    re: /(?<![\p{L}])(?:hari\s+)?(senin|selasa|rabu|kamis|jum'?at|sabtu|(?<=hari\s+)minggu)(?:\s+depan)?(?![\p{L}'])/iu,
+    make: (m) => ({ kind: "weekday", weekday: WEEKDAYS[m[1].toLowerCase()] }),
+  },
+];
+
+/** The earliest date written in the body, if any. */
+export function findDate(text: string, start = 0): DateToken | null {
+  const body = text.slice(start);
+  let best: DateToken | null = null;
+  for (const rule of DATE_RULES) {
+    const m = rule.re.exec(body);
+    if (!m) continue;
+    const t = rule.make(m);
+    if (!t) continue;
+    const from = start + m.index;
+    if (!best || from < best.from) best = { ...t, from, to: from + m[0].length };
+  }
+  return best;
+}
 
 export function parseLine(text: string): ParsedLine {
   if (text.trim() === "") {
-    return { kind: "blank", indent: 0, markerFrom: -1, bodyFrom: 0, time: null };
+    return { kind: "blank", indent: 0, markerFrom: -1, bodyFrom: 0, time: null, date: null };
   }
   if (DIVIDER.test(text)) {
-    return { kind: "divider", indent: 0, markerFrom: -1, bodyFrom: 0, time: null };
+    return { kind: "divider", indent: 0, markerFrom: -1, bodyFrom: 0, time: null, date: null };
   }
   const indent = text.length - text.trimStart().length;
   const m = MARKER.exec(text);
@@ -55,11 +150,29 @@ export function parseLine(text: string): ParsedLine {
     markerFrom = m[1].length;
     bodyFrom = m[0].length;
   }
-  return { kind, indent, markerFrom, bodyFrom, time: findTime(text, bodyFrom) };
+  const date = findDate(text, bodyFrom);
+  let time = findTime(text, bodyFrom);
+  // A token can't be both (e.g. digits inside "25 nov 2026").
+  if (time && date && time.from < date.to && date.from < time.to) time = null;
+  return { kind, indent, markerFrom, bodyFrom, time, date };
 }
 
 export function findTime(text: string, start = 0): TimeToken | null {
   const body = text.slice(start);
+  const rel = REL_TIME.exec(body);
+  if (rel) {
+    const minutes = rel[3] ? 30 : /^j/i.test(rel[2]) ? +rel[1] * 60 : +rel[1];
+    if (minutes > 0) {
+      return {
+        hour: 0,
+        minute: 0,
+        ambiguous: false,
+        relMinutes: minutes,
+        from: start + rel.index,
+        to: start + rel.index + rel[0].length,
+      };
+    }
+  }
   const jam = JAM.exec(body);
   if (jam) {
     const h = Number(jam[1]);
@@ -176,18 +289,129 @@ export function resolveTime(t: TimeToken, now: Date): Date | null {
   return null;
 }
 
-/** Open to-dos with a time later today. Done and snoozed lines never fire. */
+const startOfDay = (d: Date) => new Date(d.getFullYear(), d.getMonth(), d.getDate());
+const DAY_MS = 86_400_000;
+
+/** The calendar day a date token points at (local midnight), or null when invalid. */
+export function resolveDate(t: DateToken, now: Date): Date | null {
+  const today = startOfDay(now);
+  if (t.kind === "offset") return new Date(today.getFullYear(), today.getMonth(), today.getDate() + (t.days ?? 0));
+  if (t.kind === "weekday") {
+    const diff = ((t.weekday ?? 0) - today.getDay() + 7) % 7 || 7;
+    return new Date(today.getFullYear(), today.getMonth(), today.getDate() + diff);
+  }
+  const day = t.day ?? 1;
+  const make = (y: number, m: number) => {
+    const d = new Date(y, m, day);
+    return d.getDate() === day ? d : null; // 31/2 is not a day
+  };
+  if (t.month === undefined) {
+    // "tgl 25": this month, or next month once it has passed.
+    const d = make(today.getFullYear(), today.getMonth());
+    if (d && d >= today) return d;
+    return make(today.getFullYear(), today.getMonth() + 1);
+  }
+  if (t.year !== undefined) return make(t.year, t.month);
+  // No year: this year, unless it passed more than a month ago (then it's next year's).
+  const d = make(today.getFullYear(), t.month);
+  if (d && d.getTime() < today.getTime() - 31 * DAY_MS) return make(today.getFullYear() + 1, t.month);
+  return d;
+}
+
+/** Hour for an ambiguous "jam N" on a future day: office-hours bias, 7-11 morning, 12-6 afternoon. */
+const biasHour = (h: number) => (h >= 7 && h <= 11 ? h : h === 12 ? 12 : (h % 12) + 12);
+
+/** The moment a line's date and/or time point at, or null when there is none or it has passed. */
+export function resolveWhen(p: Pick<ParsedLine, "date" | "time">, now: Date): Date | null {
+  if (p.time?.relMinutes) {
+    const d = new Date(now.getTime() + p.time.relMinutes * 60_000);
+    d.setSeconds(0, 0);
+    return d;
+  }
+  if (!p.date) return p.time ? resolveTime(p.time, now) : null;
+  const day = resolveDate(p.date, now);
+  if (!day) return null;
+  if (!p.time && startOfDay(now).getTime() === day.getTime()) return null; // "hari ini" without a time
+  if (p.time && day.getTime() === startOfDay(now).getTime()) return resolveTime(p.time, now);
+  const d = new Date(day);
+  // A day without a time reminds you at 09:00 that morning.
+  if (!p.time) d.setHours(9, 0, 0, 0);
+  else d.setHours(p.time.ambiguous ? biasHour(p.time.hour) : p.time.hour, p.time.minute, 0, 0);
+  return d.getTime() > now.getTime() ? d : null;
+}
+
+/** Open to-dos with a future date or time. Done and snoozed lines never fire. */
 export function collectReminders(lines: readonly string[], now: Date): Reminder[] {
   const out: Reminder[] = [];
   lines.forEach((text, i) => {
     const p = parseLine(text);
-    if (p.kind !== "todo" || !p.time) return;
-    const d = resolveTime(p.time, now);
+    if (p.kind !== "todo" || (!p.time && !p.date)) return;
+    const d = resolveWhen(p, now);
     if (!d) return;
-    const label = (text.slice(p.bodyFrom, p.time.from) + text.slice(p.time.to))
-      .replace(/\s+/g, " ")
-      .trim();
-    out.push({ line: i, label: label || text.trim(), at: d.getTime() });
+    out.push({ line: i, label: stripWhen(text, p) || text.trim(), at: d.getTime() });
   });
+  return out;
+}
+
+/** The line's words without its marker, date and time. */
+export function stripWhen(text: string, p: ParsedLine): string {
+  const cuts = [p.date, p.time].filter((t): t is DateToken | TimeToken => !!t).sort((a, b) => b.from - a.from);
+  let body = text;
+  for (const c of cuts) body = body.slice(0, c.from) + body.slice(c.to);
+  return body.slice(p.bodyFrom).replace(/\s+/g, " ").trim();
+}
+
+const pad2 = (n: number) => String(n).padStart(2, "0");
+/** "23 nov", plus the year when it isn't this year. */
+export function formatDay(d: Date, now: Date): string {
+  const s = `${d.getDate()} ${MONTH_SHORT[d.getMonth()]}`;
+  return d.getFullYear() === now.getFullYear() ? s : `${s} ${d.getFullYear()}`;
+}
+
+/**
+ * Right-gutter label: "15:00", "besok 15:00", "kam jam 3", "25 nov". `overdue` when an open
+ * to-do's day has passed. Null when the line has no date or time.
+ */
+export function describeWhen(text: string, p: ParsedLine, now: Date): { label: string; overdue: boolean } | null {
+  if (!p.date && !p.time) return null;
+  if (p.time?.relMinutes) {
+    const at = resolveWhen(p, now)!;
+    const t = `${pad2(at.getHours())}:${pad2(at.getMinutes())}`;
+    return { label: startOfDay(at).getTime() === startOfDay(now).getTime() ? t : `besok ${t}`, overdue: false };
+  }
+  const time = p.time ? text.slice(p.time.from, p.time.to) : "";
+  if (!p.date) return { label: time, overdue: false };
+  const day = resolveDate(p.date, now);
+  if (!day) return { label: text.slice(p.date.from, p.date.to), overdue: false };
+  const diff = Math.round((day.getTime() - startOfDay(now).getTime()) / DAY_MS);
+  const dayLabel =
+    diff === 0 ? "hari ini" : diff === 1 ? "besok" : diff === -1 ? "kemarin" : diff > 1 && diff < 7 ? DAY_SHORT[day.getDay()] : formatDay(day, now);
+  const label = time ? (diff === 0 ? time : `${dayLabel} ${time}`) : dayLabel;
+  return { label, overdue: diff < 0 };
+}
+
+/**
+ * Rewrites drifting words to absolute ones, so the file still means the same thing tomorrow:
+ * "besok" → "23 nov", "senin" → "24 nov", "2 jam lagi" → "17:45". To-do lines only.
+ * Returns the new text, or null when nothing changes.
+ */
+export function commitWhen(text: string, now: Date): string | null {
+  const p = parseLine(text);
+  if (p.kind !== "todo") return null;
+  const edits: { from: number; to: number; insert: string }[] = [];
+  if (p.date && p.date.kind !== "abs") {
+    const d = resolveDate(p.date, now);
+    if (d) edits.push({ from: p.date.from, to: p.date.to, insert: formatDay(d, now) });
+  }
+  if (p.time?.relMinutes) {
+    const at = resolveWhen(p, now)!;
+    const t = `${pad2(at.getHours())}:${pad2(at.getMinutes())}`;
+    const sameDay = startOfDay(at).getTime() === startOfDay(now).getTime();
+    edits.push({ from: p.time.from, to: p.time.to, insert: sameDay || p.date ? t : `${formatDay(at, now)} ${t}` });
+  }
+  if (!edits.length) return null;
+  edits.sort((a, b) => b.from - a.from);
+  let out = text;
+  for (const e of edits) out = out.slice(0, e.from) + e.insert + out.slice(e.to);
   return out;
 }

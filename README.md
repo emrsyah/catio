@@ -35,7 +35,12 @@ File-nya ada di `Documents\Catio\catio.md`. Bisa dibuka di Notepad kapan aja. Pe
 | `Ctrl+F` / `Ctrl+H` | Cari / ganti |
 | `Ctrl+=` `Ctrl+-` `Ctrl+0`, Ctrl+scroll | Zoom |
 
-Semua baris di atas `---` pertama itu fokus. To-do dengan jam (`15:00`, `jam 3`) bakal muncul jadi notifikasi Windows.
+Semua baris di atas `---` pertama itu fokus. To-do dengan jam atau tanggal bakal muncul jadi notifikasi Windows. Begitu kebaca, jam/tanggalnya jadi chip oranye, nggak perlu Enter:
+
+- Jam: `15:00`, `jam 3`, `2 jam lagi`, `30 menit lagi`, `setengah jam lagi`
+- Hari: `hari ini`, `besok`/`bsk`, `lusa`, `senin`…`sabtu`, `hari minggu`, `3 hari lagi`, `minggu depan`
+- Tanggal: `25 nov`, `25 november 2027`, `25/11`, `tgl 25`
+- Tanpa jam = diingetin jam 09:00 hari itu. Kata yang "geser" (`besok`, `senin`, `2 jam lagi`) dikunci jadi tanggal/jam pasti waktu kamu pindah baris, biar file-nya tetap benar besok.
 
 ## Struktur
 
