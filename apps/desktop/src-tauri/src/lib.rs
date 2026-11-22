@@ -23,17 +23,60 @@ struct Loaded {
     path: String,
     text: String,
     first_run: bool,
+    /// The pad this text belongs to.
+    pad: String,
+}
+
+fn loaded(doc: &DocState, text: String) -> Loaded {
+    Loaded { path: doc.path().display().to_string(), text, first_run: doc.first_run, pad: doc.active() }
 }
 
 #[tauri::command]
 fn load_doc(doc: State<DocState>) -> Result<Loaded, String> {
     let text = doc.load().map_err(|e| e.to_string())?;
-    Ok(Loaded { path: doc.path().display().to_string(), text, first_run: doc.first_run })
+    Ok(loaded(&doc, text))
 }
 
 #[tauri::command]
-fn archive_lines(doc: State<DocState>, date: String, lines: Vec<String>) -> Result<String, String> {
-    doc.archive(&date, &lines).map_err(|e| e.to_string())
+fn archive_lines(doc: State<DocState>, date: String, pad: String, lines: Vec<String>) -> Result<String, String> {
+    doc.archive(&date, &pad, &lines).map_err(|e| e.to_string())
+}
+
+// ---------- pads ----------
+
+#[tauri::command]
+fn list_pads(app: AppHandle, doc: State<DocState>) -> Vec<doc::PadInfo> {
+    doc.list(&app)
+}
+
+#[tauri::command]
+fn switch_pad(app: AppHandle, doc: State<DocState>, name: String) -> Result<Loaded, String> {
+    let text = doc.switch(&app, &name).map_err(|e| e.to_string())?;
+    Ok(loaded(&doc, text))
+}
+
+/// Creates an empty pad and opens it.
+#[tauri::command]
+fn create_pad(app: AppHandle, doc: State<DocState>, name: String) -> Result<Loaded, String> {
+    let name = doc.create(&app, &name).map_err(|e| e.to_string())?;
+    let text = doc.switch(&app, &name).map_err(|e| e.to_string())?;
+    Ok(loaded(&doc, text))
+}
+
+#[tauri::command]
+fn rename_pad(app: AppHandle, doc: State<DocState>, old: String, name: String) -> Result<String, String> {
+    doc.rename(&app, &old, &name).map_err(|e| e.to_string())
+}
+
+/// Returns where the file went (inside .terhapus), for "batal".
+#[tauri::command]
+fn delete_pad(doc: State<DocState>, name: String) -> Result<String, String> {
+    doc.delete(&name).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn restore_pad(app: AppHandle, doc: State<DocState>, trashed: String, name: String) -> Result<String, String> {
+    doc.restore(&app, &trashed, &name).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -56,12 +99,12 @@ async fn choose_folder(app: AppHandle, current: String) -> Result<Option<Loaded>
     let Some(dir) = picked.and_then(|p| p.into_path().ok()) else { return Ok(None) };
     let doc = app.state::<DocState>();
     let text = doc.switch_folder(&app, &dir, &current).map_err(|e| e.to_string())?;
-    Ok(Some(Loaded { path: doc.path().display().to_string(), text, first_run: false }))
+    Ok(Some(Loaded { first_run: false, ..loaded(&doc, text) }))
 }
 
 #[tauri::command]
-fn save_doc(doc: State<DocState>, text: String) -> Result<(), String> {
-    doc.save(&text).map_err(|e| e.to_string())
+fn save_doc(doc: State<DocState>, pad: String, text: String) -> Result<(), String> {
+    doc.save(&pad, &text).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -167,7 +210,13 @@ pub fn run() {
             choose_folder,
             set_dock,
             dock_expand,
-            dock_collapse
+            dock_collapse,
+            list_pads,
+            switch_pad,
+            create_pad,
+            rename_pad,
+            delete_pad,
+            restore_pad
         ])
         .run(tauri::generate_context!())
         .expect("error while running Catio");
@@ -197,8 +246,8 @@ fn build_tray(app: &AppHandle) -> tauri::Result<()> {
     let protect = CheckMenuItem::with_id(app, "protect", "Sembunyiin dari share screen", true, !cfg!(debug_assertions), None::<&str>)?;
     let autostart_on = app.autolaunch().is_enabled().unwrap_or(false);
     let autostart = CheckMenuItem::with_id(app, "autostart", "Jalan waktu Windows nyala", true, autostart_on, None::<&str>)?;
-    let folder = MenuItem::with_id(app, "folder", "Buka folder catio.md", true, None::<&str>)?;
-    let move_folder = MenuItem::with_id(app, "move-folder", "Pindahin catio.md ke folder lain…", true, None::<&str>)?;
+    let folder = MenuItem::with_id(app, "folder", "Buka folder Catio", true, None::<&str>)?;
+    let move_folder = MenuItem::with_id(app, "move-folder", "Pindahin folder Catio…", true, None::<&str>)?;
     let quit = MenuItem::with_id(app, "quit", "Keluar", true, None::<&str>)?;
     let sep = PredefinedMenuItem::separator(app)?;
     let sep2 = PredefinedMenuItem::separator(app)?;

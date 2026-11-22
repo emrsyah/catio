@@ -694,10 +694,18 @@ export function createEditor(parent: HTMLElement, doc: string, hooks: EditorHook
     keymap.of([...searchKeymap, ...historyKeymap, ...defaultKeymap]),
     escKeymap,
     EditorView.updateListener.of(onChange),
-    EditorView.contentAttributes.of({ spellcheck: "false", autocorrect: "off", "aria-label": "catio.md" }),
+    EditorView.contentAttributes.of({ spellcheck: "false", autocorrect: "off" }),
   ];
+  currentExtensions = extensions;
 
   return new EditorView({ parent, state: EditorState.create({ doc, extensions }) });
+}
+
+let currentExtensions: Extension[] = [];
+
+/** Opens another pad's text with a fresh state: own undo history, caret at the top. */
+export function loadDoc(view: EditorView, text: string) {
+  view.setState(EditorState.create({ doc: text, extensions: currentExtensions }));
 }
 
 /** Replace the document with minimal changes so the cursor stays where it was. */

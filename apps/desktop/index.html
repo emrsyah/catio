@@ -10,6 +10,11 @@
     <div class="frame"><div class="shell" id="shell">
     <div class="strip" data-tauri-drag-region>
       <span class="save-dot" id="save-dot" data-state="saved" role="img" aria-label="Tersimpan" title="Tersimpan"></span>
+      <button type="button" class="pad-btn" id="pad-btn" aria-haspopup="menu" aria-expanded="false" aria-controls="pad-menu">
+        <span id="pad-name">catio</span>
+        <svg viewBox="0 0 10 10" width="10" height="10" aria-hidden="true"><path d="M2.5 4l2.5 2.5L7.5 4" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round" /></svg>
+      </button>
+      <div class="pad-menu" id="pad-menu" role="menu" aria-label="Pad"></div>
       <span class="status" id="status" role="status" aria-live="polite"></span>
       <div class="controls">
         <button type="button" id="btn-dock" aria-label="Mode dock" title="Mode dock: ngecil ke pojok kanan bawah, buka pas di-hover">

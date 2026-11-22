@@ -19,6 +19,15 @@ pub struct Reminder {
     pub at: i64,
     /// "15:00", formatted in local time by the webview
     pub clock: String,
+    /// Which pad the line is in; "Buka" switches to it first.
+    #[serde(default)]
+    pub pad: String,
+}
+
+#[derive(Clone, serde::Serialize)]
+struct FocusLine {
+    pad: String,
+    line: usize,
 }
 
 #[derive(Default)]
@@ -50,7 +59,7 @@ pub fn schedule(app: &AppHandle, list: Vec<Reminder>) {
             if state.generation.load(Ordering::SeqCst) != gen {
                 return; // the file changed since; a newer schedule owns this reminder
             }
-            if !state.fired.lock().unwrap().insert((r.label.clone(), r.at)) {
+            if !state.fired.lock().unwrap().insert((format!("{}/{}", r.pad, r.label), r.at)) {
                 return;
             }
             show(&app, &r);
@@ -84,7 +93,7 @@ fn show(app: &AppHandle, r: &Reminder) {
     let reminder = r.clone();
     let result = Toast::new(&app_id)
         .title(&format!("{} · {}", r.label, r.clock))
-        .text1("dari pad")
+        .text1(&if r.pad.is_empty() { "dari pad".to_string() } else { format!("dari pad {}", r.pad) })
         .sound(Some(Sound::Reminder))
         .scenario(Scenario::Reminder)
         .add_button("Tunda 5 mnt", "snooze")
@@ -94,7 +103,7 @@ fn show(app: &AppHandle, r: &Reminder) {
                 snooze(&handle, reminder.clone());
             } else {
                 crate::pad::show(&handle);
-                let _ = handle.emit("focus-line", reminder.line);
+                let _ = handle.emit("focus-line", FocusLine { pad: reminder.pad.clone(), line: reminder.line });
             }
             Ok(())
         })

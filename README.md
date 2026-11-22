@@ -13,7 +13,11 @@ pnpm test       # test parser (packages/core)
 pnpm build      # installer NSIS di apps/desktop/src-tauri/target/release/bundle
 ```
 
-File-nya ada di `Documents\Catio\catio.md`. Bisa dibuka di Notepad kapan aja. Perubahan dari luar langsung kebaca.
+File-nya ada di `Documents\Catio\`. Pad pertama itu `catio.md`, pad lain jadi file sendiri (`kerjaan.md`, `ide.md`). Semua bisa dibuka di Notepad kapan aja, dan perubahan dari luar langsung kebaca.
+
+## Pad
+
+Klik nama pad di kiri atas buat lihat semua pad (dengan jumlah to-do yang belum beres), pindah, atau bikin pad baru. Hover satu pad buat ganti nama atau hapus. Pad yang dihapus masuk ke `Documents\Catio\.terhapus\` dan bisa dibalikin lewat "batal". Pengingat dan badge dock jalan di semua pad.
 
 ## Keyboard
 
@@ -21,6 +25,9 @@ File-nya ada di `Documents\Catio\catio.md`. Bisa dibuka di Notepad kapan aja. Pe
 |---|---|
 | `Ctrl+Alt+N` | Munculin / sembunyiin pad (global) |
 | `Esc` | Tutup pencarian → hapus seleksi → sembunyiin pad |
+| `Ctrl+N` | Pad baru |
+| `Ctrl+Tab` / `Ctrl+Shift+Tab` | Pad berikutnya / sebelumnya |
+| `Ctrl+1`…`Ctrl+9` | Lompat ke pad ke-N |
 | `[]` | Jadi checkbox `[ ] ` |
 | `Ctrl+Enter` | Centang / buka centang (teks biasa jadi to-do) |
 | `Ctrl+Shift+Enter` | Tunda sampai besok (`[>]`), atau balikin. Kursor di ujung kanan baris → "nanti" (to-do yang udah beres: "hapus") |
@@ -47,7 +54,8 @@ Semua baris di atas `---` pertama itu fokus. To-do dengan jam atau tanggal bakal
 ```
 packages/core/          parser murni (TS, tanpa dependency) + test node:test
 apps/desktop/           Vite + CodeMirror 6 (src/), Tauri v2 (src-tauri/)
-  src-tauri/src/doc.rs        simpan atomic, watcher, salinan konflik
+  src/pads.ts                 menu pad (pindah, bikin, ganti nama, hapus)
+  src-tauri/src/doc.rs        pad = file .md, simpan atomic, watcher, salinan konflik, .terhapus
   src-tauri/src/pad.rs        show/hide, balikin fokus, clamp ke monitor
   src-tauri/src/reminders.rs  timer pengingat → notifikasi
 brand/                  konsep logo + icon sementara
@@ -59,6 +67,6 @@ Udah ada: jendela selalu di atas tanpa taskbar, hotkey global, tray (buka, share
 
 Mode dock: tombol ▣ di strip atau tray → pad ngecil jadi icon di pojok kanan bawah (badge = to-do fokus yang belum beres). Hover buat buka, klik buat ngetik, kursor keluar = ngecil lagi.
 
-Pindahin `catio.md` (misal ke OneDrive buat sinkron HP v0): tray → "Pindahin catio.md ke folder lain…".
+Pindahin semua pad (misal ke OneDrive buat sinkron HP v0): tray → "Pindahin folder Catio…".
 
 Belum ada: ganti hotkey dari UI, umur tugas ("2 hari", butuh riwayat), penanda konflik di gutter + "pakai versi HP/laptop" (sekarang versi luar disimpan jadi `catio.conflict-*.md`), auto-sembunyi waktu ada app full screen, `Ctrl+K` cari arsip, riwayat & pulihkan, sinkron HP.

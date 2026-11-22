@@ -7,6 +7,7 @@
   --line: #ece9e4;
   --box: #8e8a83; /* control stroke, 3:1 */
   --hover: #f2f0ec;
+  --selected: #ebe8e3; /* chosen item: one step past hover */
   --well: #efede9; /* sunk fields */
   --accent: #e2552d; /* bars, rings, non-text */
   --accent-text: #b5441f; /* small orange text, 4.5:1 */
@@ -45,6 +46,7 @@
     --line: #2e2c29;
     --box: #7a766f;
     --hover: #2a2926;
+    --selected: #34322e;
     --well: #171615;
     --accent: #f0693f;
     --accent-text: #f0693f;
@@ -107,6 +109,261 @@ body {
   padding: 0 4px 0 12px;
   cursor: default;
   user-select: none;
+}
+
+/* ---------- pad switcher ---------- */
+.strip {
+  position: relative;
+  z-index: 5; /* the menu floats over the editor */
+}
+.pad-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  min-width: 0;
+  max-width: 160px;
+  height: 20px;
+  margin-left: -2px;
+  padding: 0 5px 0 6px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--ink-2);
+  font: inherit;
+  font-size: 12px;
+  letter-spacing: -0.01em;
+  cursor: pointer;
+  transition:
+    background-color var(--t) var(--ease-out),
+    color var(--t) var(--ease-out),
+    transform var(--t) var(--ease-out);
+}
+#pad-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.pad-btn svg {
+  flex: none;
+  transition: transform var(--t) var(--ease-out);
+}
+.pad-btn[aria-expanded="true"] {
+  background: var(--hover);
+  color: var(--ink);
+}
+.pad-btn[aria-expanded="true"] svg {
+  transform: rotate(180deg);
+}
+@media (hover: hover) and (pointer: fine) {
+  .pad-btn:hover {
+    background: var(--hover);
+    color: var(--ink);
+  }
+}
+.pad-btn:active {
+  transform: scale(var(--squeeze));
+}
+.pad-btn:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: -2px;
+}
+
+/* Overlay: top surface, crisp ring + drop. Opens from the button (top-left), 150ms; closes 120ms. */
+.pad-menu {
+  position: absolute;
+  top: 24px;
+  left: 6px;
+  z-index: 40;
+  width: 220px;
+  max-width: calc(100vw - 24px);
+  padding: 4px;
+  border-radius: 8px;
+  background: var(--surface-top);
+  box-shadow: var(--shadow-menu);
+  transform-origin: 0 0;
+  opacity: 0;
+  transform: scale(var(--squeeze));
+  visibility: hidden;
+  pointer-events: none;
+  transition:
+    opacity var(--t-fast) var(--ease-out),
+    transform var(--t-fast) var(--ease-out),
+    visibility 0s linear var(--t-fast);
+}
+.pad-menu[data-open] {
+  opacity: 1;
+  transform: none;
+  visibility: visible;
+  pointer-events: auto;
+  transition:
+    opacity var(--t) var(--ease-out),
+    transform var(--t) var(--ease-out),
+    visibility 0s;
+}
+@media (prefers-reduced-motion: reduce) {
+  .pad-menu {
+    transform: none;
+  }
+}
+/* In dark the menu is already a step up, so its hover/chosen steps shift up with it. */
+@media (prefers-color-scheme: dark) {
+  .pad-menu {
+    --hover: #34322e;
+    --selected: #3d3b37;
+    --well: #1e1d1b;
+  }
+}
+.pad-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 232px;
+  overflow-y: auto;
+  scrollbar-width: thin;
+}
+.pad-row {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 32px;
+  padding: 0 8px 0 10px;
+  border-radius: 6px;
+  color: var(--ink-2);
+  font-size: 13px;
+  letter-spacing: -0.01em;
+  cursor: pointer;
+  user-select: none;
+  transition:
+    background-color var(--t) var(--ease-out),
+    color var(--t) var(--ease-out);
+}
+/* Chosen pad: two steps above the menu, strong ink. Hover/focus: one step. No tick. */
+.pad-row[aria-checked="true"] {
+  background: var(--selected);
+  color: var(--ink);
+}
+@media (hover: hover) and (pointer: fine) {
+  .pad-row:hover {
+    background: var(--hover);
+    color: var(--ink);
+  }
+  .pad-row[aria-checked="true"]:hover {
+    background: var(--selected);
+  }
+}
+.pad-row:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: -2px;
+  color: var(--ink);
+}
+.pad-row-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.pad-row-count {
+  font-size: 12px;
+  color: var(--ink-3);
+  font-variant-numeric: tabular-nums;
+  transition: opacity var(--t) var(--ease-out);
+}
+/* Rename / delete take the count's place on hover or keyboard focus. */
+.pad-row-actions {
+  position: absolute;
+  right: 4px;
+  display: flex;
+  gap: 2px;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity var(--t) var(--ease-out);
+}
+@media (hover: hover) and (pointer: fine) {
+  .pad-row:hover .pad-row-actions {
+    opacity: 1;
+    pointer-events: auto;
+  }
+  .pad-row:hover .pad-row-count {
+    opacity: 0;
+  }
+}
+.pad-row:focus-within .pad-row-actions {
+  opacity: 1;
+  pointer-events: auto;
+}
+.pad-row:focus-within .pad-row-count {
+  opacity: 0;
+}
+.pad-row-actions button {
+  width: 24px;
+  height: 24px;
+  display: grid;
+  place-items: center;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--ink-3);
+  cursor: pointer;
+  transition:
+    background-color var(--t) var(--ease-out),
+    color var(--t) var(--ease-out),
+    transform var(--t) var(--ease-out);
+}
+.pad-row-actions button:hover {
+  background: var(--surface-top);
+  box-shadow: var(--shadow-button);
+  color: var(--ink);
+}
+.pad-row-actions button[data-act="delete"]:hover {
+  color: var(--accent-text);
+}
+.pad-row-actions button:active {
+  transform: scale(var(--squeeze-sm));
+}
+.pad-row-actions button:disabled {
+  opacity: 0.4;
+  cursor: default;
+  box-shadow: none;
+  background: transparent;
+}
+.pad-row-actions button:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: -2px;
+}
+.pad-row.is-editing {
+  padding: 0 4px;
+  cursor: default;
+}
+.pad-input {
+  flex: 1;
+  min-width: 0;
+  height: 26px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 5px;
+  background: var(--well);
+  color: var(--ink);
+  font: inherit;
+  font-size: 13px;
+  outline: none;
+}
+.pad-input:focus-visible {
+  box-shadow: 0 0 0 2px var(--focus-ring);
+}
+.pad-input::placeholder {
+  color: var(--ink-3);
+}
+.pad-sep {
+  height: 0.5px;
+  margin: 4px 6px;
+  background: var(--line);
+}
+.pad-new kbd {
+  font-family: "Geist Mono Variable", ui-monospace, monospace;
+  font-size: 11px;
+  color: var(--ink-3);
 }
 
 /* Save state as a dot, not words: green saved, grey pending, orange failed. */

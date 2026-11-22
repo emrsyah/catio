@@ -8,7 +8,8 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { collectReminders, lastDayStart, wakeSnoozed } from "@catio/core";
-import { commitActiveLine, createEditor, replaceDoc } from "./editor";
+import { commitActiveLine, createEditor, loadDoc, replaceDoc } from "./editor";
+import { setupPadMenu } from "./pads";
 
 type ResizeDirection = Parameters<ReturnType<typeof getCurrentWindow>["startResizeDragging"]>[0];
 
@@ -16,6 +17,12 @@ interface Loaded {
   path: string;
   text: string;
   first_run: boolean;
+  pad: string;
+}
+
+interface PadInfo {
+  name: string;
+  text: string;
 }
 
 const SAVE_DEBOUNCE_MS = 300;
@@ -25,6 +32,10 @@ const external = Annotation.define<boolean>();
 const statusEl = document.getElementById("status")!;
 
 let view: EditorView;
+/** The pad on screen, and every pad's text as last read (the active one is stale: use the editor). */
+let pad = "catio";
+let padList: PadInfo[] = [];
+let padMenu: ReturnType<typeof setupPadMenu>;
 let saveTimer: number | undefined;
 let dirty = false;
 let statusTimer: number | undefined;
@@ -99,9 +110,11 @@ function setSaveState(state: keyof typeof SAVE_LABELS) {
 
 async function save() {
   window.clearTimeout(saveTimer);
+  const forPad = pad; // a save still in flight after a switch must land in the right file
   const text = view.state.doc.toString();
   try {
-    await invoke("save_doc", { text });
+    await invoke("save_doc", { pad: forPad, text });
+    if (pad !== forPad) return;
     // Something typed while saving keeps the dot grey until the next save.
     dirty = view.state.doc.toString() !== text;
     if (!dirty) setSaveState("saved");
@@ -111,15 +124,173 @@ async function save() {
     setSaveState("error");
     setStatus("belum tersimpan · tekan Ctrl+S buat coba lagi", "accent");
   }
-  scheduleReminders(text);
+  scheduleReminders();
 }
 
-function scheduleReminders(text: string) {
-  const reminders = collectReminders(text.split(/\r?\n/), new Date()).map((r) => ({
-    ...r,
-    clock: new Date(r.at).toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit", hour12: false }).replace(".", ":"),
-  }));
+/** Every pad's current text: the editor for the one on screen, the last read for the rest. */
+function allTexts(): PadInfo[] {
+  const text = view.state.doc.toString();
+  if (!padList.some((p) => p.name === pad)) return [{ name: pad, text }, ...padList];
+  return padList.map((p) => (p.name === pad ? { name: pad, text } : p));
+}
+
+/** Open to-dos with words in them (snoozed and empty ones don't count). */
+function countOpen(text: string) {
+  return text.split("\n").filter((l) => /^\s*\[ \]\s*\S/.test(l)).length;
+}
+
+/** Reminders from every pad, not only the one on screen. */
+function scheduleReminders() {
+  const now = new Date();
+  const reminders = allTexts().flatMap((p) =>
+    collectReminders(p.text.split(/\r?\n/), now).map((r) => ({
+      ...r,
+      pad: p.name,
+      clock: new Date(r.at).toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit", hour12: false }).replace(".", ":"),
+    })),
+  );
   invoke("set_reminders", { reminders }).catch(console.error);
+  updateDockBadge();
+}
+
+// ---------- pads ----------
+
+async function refreshPads() {
+  try {
+    padList = await invoke<PadInfo[]>("list_pads");
+  } catch (err) {
+    console.error(err);
+  }
+  padMenu.refresh();
+  scheduleReminders();
+}
+
+/** Shows a pad's text with its own undo history, then catches up everything that depends on it. */
+function showPad(res: Loaded) {
+  pad = res.pad;
+  dirty = false;
+  setSaveState("saved");
+  loadDoc(view, res.text);
+  view.contentDOM.setAttribute("aria-label", `Pad ${pad}`);
+  wakeIfNewDay();
+  padMenu.refresh();
+  view.focus();
+}
+
+/** Finish what's on screen (lock relative dates, save) before leaving it. */
+async function flushCurrent() {
+  commitActiveLine(view);
+  if (dirty) await save();
+}
+
+async function switchTo(name: string) {
+  if (name === pad) return view.focus();
+  await flushCurrent();
+  try {
+    showPad(await invoke<Loaded>("switch_pad", { name }));
+  } catch (err) {
+    console.error(err);
+    setStatus("pad itu nggak bisa dibuka", "accent", 3000);
+  }
+  await refreshPads();
+}
+
+async function createPad(name: string) {
+  await flushCurrent();
+  try {
+    const res = await invoke<Loaded>("create_pad", { name });
+    showPad(res);
+    setStatus(`pad ${res.pad} siap`, "quiet", 1500);
+  } catch (err) {
+    console.error(err);
+    setStatus("pad baru nggak bisa dibikin", "accent", 3000);
+  }
+  await refreshPads();
+}
+
+async function renamePad(old: string, name: string) {
+  try {
+    if (old === pad) await flushCurrent();
+    const next = await invoke<string>("rename_pad", { old, name });
+    if (old === pad) {
+      pad = next;
+      view.contentDOM.setAttribute("aria-label", `Pad ${pad}`);
+    }
+  } catch (err) {
+    console.error(err);
+    setStatus("nama itu nggak bisa dipakai", "accent", 3000);
+  }
+  await refreshPads();
+}
+
+/** Delete = move to .terhapus, with "batal" in the strip for a few seconds. No dialog. */
+async function deletePad(name: string) {
+  const list = allTexts();
+  if (list.length <= 1) return setStatus("minimal harus ada satu pad", "quiet", 2000);
+  const wasActive = name === pad;
+  if (wasActive) {
+    window.clearTimeout(saveTimer);
+    await save(); // keep the last keystrokes in the file that goes to .terhapus
+  }
+  let trashed: string;
+  try {
+    trashed = await invoke<string>("delete_pad", { name });
+  } catch (err) {
+    console.error(err);
+    return setStatus("pad itu nggak bisa dihapus", "accent", 3000);
+  }
+  if (wasActive) {
+    const i = list.findIndex((p) => p.name === name);
+    const next = list[i + 1]?.name ?? list[i - 1]?.name;
+    if (next) {
+      try {
+        showPad(await invoke<Loaded>("switch_pad", { name: next }));
+      } catch (err) {
+        console.error(err);
+      }
+    }
+  }
+  await refreshPads();
+  setStatus(`pad ${name} dihapus`, "quiet", UNDO_WINDOW_MS, {
+    label: "batal",
+    run: async () => {
+      try {
+        const back = await invoke<string>("restore_pad", { trashed, name });
+        await refreshPads();
+        await switchTo(back);
+        setStatus("dibalikin", "quiet", 1500);
+      } catch (err) {
+        console.error(err);
+        setStatus("nggak bisa dibalikin · cek folder .terhapus", "accent", 4000);
+      }
+    },
+  });
+}
+
+/** Ctrl+N new pad, Ctrl+Tab / Ctrl+Shift+Tab next/previous, Ctrl+1…9 jump. Instant, no animation. */
+function setupPadKeys() {
+  window.addEventListener(
+    "keydown",
+    (e) => {
+      if (!e.ctrlKey || e.altKey || e.metaKey) return;
+      const names = allTexts().map((p) => p.name);
+      if (e.key.toLowerCase() === "n" && !e.shiftKey) {
+        e.preventDefault();
+        padMenu.open({ newPad: true });
+      } else if (e.key === "Tab" && names.length > 1) {
+        e.preventDefault();
+        const i = names.indexOf(pad);
+        void switchTo(names[(i + (e.shiftKey ? -1 : 1) + names.length) % names.length]);
+      } else if (/^[1-9]$/.test(e.key) && !e.shiftKey) {
+        const target = names[Number(e.key) - 1];
+        if (target) {
+          e.preventDefault();
+          void switchTo(target);
+        }
+      }
+    },
+    true,
+  );
 }
 
 function onChange(u: ViewUpdate) {
@@ -151,8 +322,8 @@ async function onExternalChange(text: string) {
     return;
   }
   replaceDoc(view, text, { annotations: external.of(true) });
-  scheduleReminders(text);
-  if (docked) updateDockBadge(); // edited in Notepad / on the phone while collapsed
+  scheduleReminders(); // also refreshes the dock badge (edited in Notepad while collapsed)
+  padMenu.refresh();
 }
 
 // ---------- Bersihin ----------
@@ -165,7 +336,7 @@ function today() {
 
 async function onCleaned(lines: string[], revert: () => boolean) {
   try {
-    const block = await invoke<string>("archive_lines", { date: today(), lines });
+    const block = await invoke<string>("archive_lines", { date: today(), pad, lines });
     setStatus(`${lines.length} yang selesai pindah ke arsip.md`, "quiet", UNDO_WINDOW_MS, {
       label: "batal",
       run: () => {
@@ -188,9 +359,11 @@ async function onCleaned(lines: string[], revert: () => boolean) {
 /** Snoozed lines come back as open to-dos once per day, at the first check after 04:00. */
 function wakeIfNewDay() {
   const boundary = lastDayStart(new Date()).getTime();
+  // Per pad: a pad you open for the first time today still wakes its own snoozes.
+  const key = pad === "catio" ? WAKE_KEY : `${WAKE_KEY}.${pad}`;
   let last = 0;
   try {
-    last = Number(localStorage.getItem(WAKE_KEY)) || 0;
+    last = Number(localStorage.getItem(key)) || 0;
   } catch {
     /* treat as never */
   }
@@ -199,7 +372,7 @@ function wakeIfNewDay() {
   const next = wakeSnoozed(text.split("\n")).join("\n");
   if (next !== text) replaceDoc(view, next, { userEvent: "input.wake" });
   try {
-    localStorage.setItem(WAKE_KEY, String(Date.now()));
+    localStorage.setItem(key, String(Date.now()));
   } catch {
     /* wakes again next check, harmless */
   }
@@ -213,7 +386,7 @@ async function chooseFolder() {
     const res = await invoke<Loaded | null>("choose_folder", { current: view.state.doc.toString() });
     if (!res) return;
     replaceDoc(view, res.text, { annotations: external.of(true) });
-    scheduleReminders(res.text);
+    await refreshPads();
     setStatus(`sekarang di ${shortPath(res.path)}`, "quiet", 4000);
   } catch (err) {
     console.error(err);
@@ -270,14 +443,11 @@ function setDock(on: boolean) {
   invoke("set_dock", { on }).catch(console.error);
 }
 
-/** Every open to-do in the file (snoozed ones wait for tomorrow and don't count),
- *  shown as a badge on the collapsed icon. Empty "[ ]" lines don't count either. */
+/** Every open to-do across all pads (snoozed and empty ones don't count),
+ *  shown as a badge on the collapsed icon. */
 function updateDockBadge() {
   const badge = document.getElementById("dock-badge")!;
-  const open = view.state.doc
-    .toString()
-    .split("\n")
-    .filter((l) => /^\s*\[ \]\s*\S/.test(l)).length;
+  const open = allTexts().reduce((n, p) => n + countOpen(p.text), 0);
   badge.hidden = open === 0;
   badge.textContent = open > 99 ? "99+" : String(open);
   const label = `${open} to-do belum beres`;
@@ -368,7 +538,8 @@ function setupWindowChrome() {
 
 async function boot() {
   setupWindowChrome();
-  const { text, path, first_run } = await invoke<Loaded>("load_doc");
+  const { text, path, first_run, pad: openPad } = await invoke<Loaded>("load_doc");
+  pad = openPad;
   view = createEditor(
     document.getElementById("editor")!,
     text,
@@ -380,9 +551,20 @@ async function boot() {
     },
     onChange,
   );
+  view.contentDOM.setAttribute("aria-label", `Pad ${pad}`);
   view.focus();
+  padMenu = setupPadMenu({
+    list: () => allTexts().map((p) => ({ name: p.name, open: countOpen(p.text) })),
+    current: () => pad,
+    select: (name) => void switchTo(name),
+    create: (name) => void createPad(name),
+    rename: (old, name) => void renamePad(old, name),
+    remove: (name) => void deletePad(name),
+    closed: () => view.focus(),
+  });
+  setupPadKeys();
   wakeIfNewDay();
-  scheduleReminders(view.state.doc.toString());
+  await refreshPads();
   await setupDock();
   if (first_run) {
     setStatus(`disimpan di ${shortPath(path)}`, "quiet", 0, { label: "ganti", run: () => void chooseFolder() });
@@ -390,19 +572,22 @@ async function boot() {
   }
 
   await listen<string>("doc-changed", (e) => void onExternalChange(e.payload));
+  // Another pad's file changed (Notepad, phone sync, a pad added in Explorer).
+  await listen("pads-changed", () => void refreshPads());
   await listen("choose-folder", () => void chooseFolder());
   await listen("pad-shown", () => {
     view.focus();
     wakeIfNewDay();
-    scheduleReminders(view.state.doc.toString());
+    scheduleReminders();
   });
   // The pad never quits, so "jam 9" written last night must still get scheduled today.
   window.setInterval(() => {
     wakeIfNewDay();
-    scheduleReminders(view.state.doc.toString());
+    scheduleReminders();
   }, 5 * 60_000);
-  await listen<number>("focus-line", (e) => {
-    const n = Math.min(Math.max(1, e.payload + 1), view.state.doc.lines);
+  await listen<{ pad: string; line: number }>("focus-line", async (e) => {
+    if (e.payload.pad && e.payload.pad !== pad) await switchTo(e.payload.pad);
+    const n = Math.min(Math.max(1, e.payload.line + 1), view.state.doc.lines);
     const ln = view.state.doc.line(n);
     view.dispatch({ selection: { anchor: ln.to }, scrollIntoView: true });
     view.focus();
