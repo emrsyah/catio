@@ -61,6 +61,8 @@ fn place(w: &WebviewWindow, width: f64, height: f64) {
 pub fn set_docked(app: &AppHandle, on: bool) {
     let Some(w) = app.get_webview_window(pad::LABEL) else { return };
     if on == is_docked() {
+        // Unchanged, but the webview may have reloaded and lost its classes: resend the state.
+        emit(app);
         return;
     }
     if on {
@@ -138,6 +140,18 @@ pub fn toggle(app: &AppHandle) {
         collapse(app);
     } else {
         expand(app, true);
+    }
+}
+
+/// window-state may restore a dock-sized window (the app quit while docked). The pad boots
+/// floating, so put a too-small window back to the default size.
+pub fn fix_startup_size(w: &WebviewWindow) {
+    let scale = w.scale_factor().unwrap_or(1.0);
+    if let Ok(s) = w.outer_size() {
+        if (s.width as f64) < 260.0 * scale || (s.height as f64) < 160.0 * scale {
+            let _ = w.set_size(tauri::LogicalSize::new(380.0, 320.0));
+            let _ = w.center();
+        }
     }
 }
 

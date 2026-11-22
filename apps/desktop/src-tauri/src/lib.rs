@@ -129,6 +129,7 @@ pub fn run() {
                 // Keep the pad out of Zoom/Meet screen shares by default.
                 // Off in dev so screenshots of the pad aren't black.
                 let _ = w.set_content_protected(!cfg!(debug_assertions));
+                dock::fix_startup_size(&w);
             }
 
             register_hotkey(&handle);

@@ -54,7 +54,7 @@ function setStatus(text: string, tone: "quiet" | "accent" = "quiet", holdMs = 0,
   statusAnim?.cancel();
   const same = statusEl.textContent === text && !action;
   statusEl.replaceChildren(text);
-  // A new message rises in a hair; repeating the same one ("tersimpan") stays still.
+  // A new message rises in a hair; repeating the same one stays still.
   if (!same) {
     const lift = reducedMotion.matches ? "0px" : "2px";
     statusAnim = statusEl.animate(
@@ -89,15 +89,26 @@ function shortPath(path: string) {
 
 // ---------- saving ----------
 
+const saveDot = document.getElementById("save-dot")!;
+const SAVE_LABELS = { saved: "Tersimpan", pending: "Belum tersimpan", error: "Gagal simpan" } as const;
+function setSaveState(state: keyof typeof SAVE_LABELS) {
+  saveDot.dataset.state = state;
+  saveDot.title = SAVE_LABELS[state];
+  saveDot.setAttribute("aria-label", SAVE_LABELS[state]);
+}
+
 async function save() {
   window.clearTimeout(saveTimer);
   const text = view.state.doc.toString();
   try {
     await invoke("save_doc", { text });
-    dirty = false;
-    if (!statusClearsOnEdit && !statusEl.querySelector(".status-action")) setStatus("tersimpan", "quiet", 1500);
+    // Something typed while saving keeps the dot grey until the next save.
+    dirty = view.state.doc.toString() !== text;
+    if (!dirty) setSaveState("saved");
+    if (statusEl.dataset.tone === "accent" && statusEl.textContent?.startsWith("belum tersimpan")) clearStatus();
   } catch (err) {
     console.error(err);
+    setSaveState("error");
     setStatus("belum tersimpan · tekan Ctrl+S buat coba lagi", "accent");
   }
   scheduleReminders(text);
@@ -120,6 +131,7 @@ function onChange(u: ViewUpdate) {
     clearStatus();
   }
   dirty = true;
+  if (saveDot.dataset.state !== "error") setSaveState("pending");
   window.clearTimeout(saveTimer);
   saveTimer = window.setTimeout(save, SAVE_DEBOUNCE_MS);
 }
@@ -292,11 +304,14 @@ async function setupDock() {
     window.clearTimeout(collapseTimer);
     collapseTimer = window.setTimeout(closeDock, COLLAPSE_DELAY_MS);
   });
+  // Always sync with Rust on boot (also after a reload), so window and classes agree.
+  let stored = false;
   try {
-    if (localStorage.getItem(DOCK_KEY) === "1") setDock(true);
+    stored = localStorage.getItem(DOCK_KEY) === "1";
   } catch {
     /* default: floating pad */
   }
+  setDock(stored);
 }
 
 // ---------- window ----------

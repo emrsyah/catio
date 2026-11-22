@@ -13,6 +13,7 @@
   --accent-soft: #e2552d1f;
   --selection: #e2552d29;
   --focus-ring: var(--ink-2);
+  --ok: #3f9d5a; /* saved dot */
   --fs: 14px;
   --gutter: 44px;
 
@@ -49,6 +50,7 @@
     --accent-text: #f0693f;
     --accent-soft: #f0693f26;
     --selection: #f0693f33;
+    --ok: #5cb874;
 
     /* Dark: lighter fill + one solid 0.5px outline + a tight black drop, never a glow. */
     --surface-top: #2a2926;
@@ -101,14 +103,31 @@ body {
   height: 24px;
   display: flex;
   align-items: center;
-  justify-content: flex-end;
   gap: 4px;
   padding: 0 4px 0 12px;
   cursor: default;
   user-select: none;
 }
 
+/* Save state as a dot, not words: green saved, grey pending, orange failed. */
+.save-dot {
+  flex: none;
+  width: 6px;
+  height: 6px;
+  margin-right: 4px;
+  border-radius: 50%;
+  background: var(--ok);
+  transition: background-color var(--t) var(--ease-out);
+}
+.save-dot[data-state="pending"] {
+  background: var(--ink-3);
+}
+.save-dot[data-state="error"] {
+  background: var(--accent);
+}
+
 .controls {
+  margin-left: auto;
   display: flex;
   gap: 2px;
   opacity: 0;
