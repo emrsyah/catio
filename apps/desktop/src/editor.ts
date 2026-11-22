@@ -52,16 +52,22 @@ class BoxWidget extends WidgetType {
     return other.state === this.state;
   }
   toDOM() {
+    // The outer span is the full 24px slot (box + gap). The caret is measured from the
+    // widget's edge, so the gap must be inside the widget, not a margin, or the caret
+    // ends up glued to the box on an empty to-do.
     const el = document.createElement("span");
     el.className = `cm-box cm-box-${this.state}`;
     el.setAttribute("aria-hidden", "true");
+    const box = document.createElement("span");
+    box.className = "cm-check";
     if (this.state === "done") {
-      el.innerHTML =
+      box.innerHTML =
         '<svg viewBox="0 0 14 14" width="14" height="14"><path d="M3.5 7.2l2.3 2.3 4.7-4.9" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>';
     } else if (this.state === "snooze") {
-      el.innerHTML =
+      box.innerHTML =
         '<svg viewBox="0 0 14 14" width="14" height="14"><path d="M6 4.5L8.5 7 6 9.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>';
     }
+    el.appendChild(box);
     return el;
   }
   ignoreEvent() {
@@ -108,6 +114,7 @@ function buildDecorations(view: EditorView): DecorationSet {
       if (p.kind === "done") classes.push("cm-done");
       if (p.kind === "snooze") classes.push("cm-snooze");
       if (p.markerFrom >= 0) classes.push("cm-task");
+      if (p.kind === "text") classes.push("cm-text");
       if (classes.length) out.push(line(classes.join(" ")).range(ln.from));
 
       if (p.markerFrom >= 0 && (p.kind === "todo" || p.kind === "done" || p.kind === "snooze")) {
@@ -143,16 +150,100 @@ const decorations = ViewPlugin.fromClass(
       }),
     eventHandlers: {
       mousedown(e, view) {
-        const target = (e.target as HTMLElement).closest(".cm-box");
-        if (!target) return false;
-        const pos = view.posAtDOM(target);
-        toggleAt(view, [view.state.doc.lineAt(pos).number]);
+        if (e.button !== 0) return false;
+        const target = e.target as HTMLElement;
+        const box = target.closest<HTMLElement>(".cm-box");
+        const lineEl = target.closest<HTMLElement>(".cm-line");
+        // The left gutter is the drag handle for every line; the box is one too.
+        const inGutter = !!lineEl && e.clientX < lineEl.getBoundingClientRect().left + GUTTER - 4;
+        if (!box && !inGutter) return false;
+        const lineNo = view.state.doc.lineAt(view.posAtDOM(box ?? lineEl!)).number;
+        const ln = view.state.doc.line(lineNo);
+        if (!box && ln.text.trim() === "") return false;
         e.preventDefault();
+        startLineDrag(view, lineNo, e, () => {
+          if (box) toggleAt(view, [lineNo]);
+          else {
+            view.dispatch({ selection: { anchor: ln.from + parseLine(ln.text).bodyFrom } });
+            view.focus();
+          }
+        });
         return true;
       },
     },
   },
 );
+
+// ---------- drag & drop lines ----------
+
+const GUTTER = 44; // keep in sync with --gutter in styles.css
+const DRAG_THRESHOLD = 4;
+
+/**
+ * Press on a checkbox or the left gutter, then drag: the line moves where the orange
+ * drop line is. A press without movement is a plain click (toggle / place caret).
+ * Dropping above "---" puts the line into focus. No animation: this is a frequent action.
+ */
+function startLineDrag(view: EditorView, source: number, down: MouseEvent, onClick: () => void) {
+  const indicator = document.getElementById("drop-line") as HTMLElement | null;
+  let dragging = false;
+  let insertBefore = source;
+
+  const targetAt = (clientY: number) => {
+    const doc = view.state.doc;
+    const y = Math.max(view.documentTop, Math.min(clientY, view.documentTop + view.contentHeight - 1));
+    const block = view.lineBlockAtHeight(y - view.documentTop);
+    const n = doc.lineAt(block.from).number;
+    const before = clientY < view.documentTop + block.top + block.height / 2;
+    return { n: before ? n : n + 1, edge: view.documentTop + (before ? block.top : block.bottom) };
+  };
+
+  const move = (e: MouseEvent) => {
+    if (!dragging) {
+      if (Math.abs(e.clientY - down.clientY) + Math.abs(e.clientX - down.clientX) < DRAG_THRESHOLD) return;
+      dragging = true;
+      document.body.classList.add("is-dragging");
+    }
+    // Nudge the scroller when dragging near its edges.
+    const r = view.scrollDOM.getBoundingClientRect();
+    if (e.clientY < r.top + 16) view.scrollDOM.scrollTop -= 8;
+    else if (e.clientY > r.bottom - 16) view.scrollDOM.scrollTop += 8;
+
+    const t = targetAt(e.clientY);
+    insertBefore = t.n;
+    if (indicator) {
+      const c = view.contentDOM.getBoundingClientRect();
+      indicator.hidden = false;
+      indicator.style.top = `${Math.round(t.edge) - 1}px`;
+      indicator.style.left = `${c.left + GUTTER - 24}px`;
+      indicator.style.width = `${Math.max(0, c.width - GUTTER + 24 - 16)}px`;
+    }
+  };
+
+  const up = () => {
+    window.removeEventListener("mousemove", move);
+    window.removeEventListener("mouseup", up);
+    document.body.classList.remove("is-dragging");
+    if (indicator) indicator.hidden = true;
+    if (!dragging) return onClick();
+    moveLine(view, source, insertBefore);
+  };
+
+  window.addEventListener("mousemove", move);
+  window.addEventListener("mouseup", up);
+}
+
+function moveLine(view: EditorView, source: number, insertBefore: number) {
+  if (insertBefore === source || insertBefore === source + 1) return;
+  const lines = view.state.doc.toString().split("\n");
+  const [text] = lines.splice(source - 1, 1);
+  const index = insertBefore > source ? insertBefore - 2 : insertBefore - 1;
+  lines.splice(index, 0, text);
+  replaceDoc(view, lines.join("\n"), { userEvent: "move.drag" });
+  const ln = view.state.doc.line(index + 1);
+  view.dispatch({ selection: { anchor: ln.to } });
+  view.focus();
+}
 
 // ---------- commands ----------
 

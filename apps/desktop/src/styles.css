@@ -52,16 +52,89 @@ body {
   flex-direction: column;
 }
 
-/* Drag strip: the only chrome. 18px so the 11px status label fits. */
+/* Drag strip: the only chrome. Controls appear on hover; double-click toggles full screen. */
 .strip {
   flex: none;
-  height: 18px;
+  height: 24px;
   display: flex;
   align-items: center;
   justify-content: flex-end;
-  padding: 0 12px;
+  gap: 4px;
+  padding: 0 4px 0 12px;
   cursor: default;
   user-select: none;
+}
+
+.controls {
+  display: flex;
+  opacity: 0;
+  transition: opacity 120ms ease;
+}
+.strip:hover .controls,
+.controls:focus-within {
+  opacity: 1;
+}
+.controls button {
+  width: 28px;
+  height: 22px;
+  display: grid;
+  place-items: center;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--ink-2);
+  cursor: pointer;
+}
+.controls button:hover {
+  background: var(--hover);
+  color: var(--ink);
+}
+.controls button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+/* Resize edges for the undecorated window. Hidden when maximized. */
+.rz {
+  position: fixed;
+  z-index: 10;
+}
+.rz-n, .rz-s { left: 8px; right: 8px; height: 5px; cursor: ns-resize; }
+.rz-e, .rz-w { top: 8px; bottom: 8px; width: 5px; cursor: ew-resize; }
+.rz-n { top: 0; }
+.rz-s { bottom: 0; }
+.rz-e { right: 0; }
+.rz-w { left: 0; }
+.rz-ne, .rz-nw, .rz-se, .rz-sw { width: 10px; height: 10px; }
+.rz-ne { top: 0; right: 0; cursor: nesw-resize; }
+.rz-sw { bottom: 0; left: 0; cursor: nesw-resize; }
+.rz-nw { top: 0; left: 0; cursor: nwse-resize; }
+.rz-se { bottom: 0; right: 0; cursor: nwse-resize; }
+.is-max .rz { display: none; }
+
+/* Where a dragged line will land. */
+.drop-line {
+  position: fixed;
+  height: 2px;
+  border-radius: 1px;
+  background: var(--accent);
+  pointer-events: none;
+  z-index: 20;
+}
+.is-dragging,
+.is-dragging * {
+  cursor: grabbing !important;
+  user-select: none;
+}
+
+/* Full screen: same pad, bigger type, a readable column. */
+.is-max #editor .cm-editor {
+  font-size: calc(var(--fs) + 2px);
+}
+.is-max #editor .cm-content {
+  max-width: 720px;
+  margin-inline: auto;
+  padding-top: 32px;
 }
 
 .status {
@@ -103,7 +176,24 @@ body {
   caret-color: var(--accent);
 }
 .cm-line {
+  position: relative;
   padding: 0 16px 0 var(--gutter);
+}
+
+/* Grip in the box slot of plain text lines: the gutter drags lines. */
+@media (hover: hover) and (pointer: fine) {
+  .cm-text:hover::before {
+    content: "";
+    position: absolute;
+    left: calc(var(--gutter) - 21px);
+    top: 50%;
+    width: 6px;
+    height: 10px;
+    margin-top: -5px;
+    background: radial-gradient(circle, var(--ink-3) 1px, transparent 1.2px) 0 0 / 3px 3.4px;
+    opacity: 0.8;
+    cursor: grab;
+  }
 }
 .cm-cursor {
   border-left: 2px solid var(--accent);
@@ -141,34 +231,43 @@ body {
 }
 
 /* Marker box sits in the left gutter so to-dos and notes share one text edge. */
+/* The widget is the whole 24px slot (14px box + 10px gap), so the caret after it
+   sits where the text starts instead of touching the box. */
 .cm-box {
+  display: inline-flex;
+  align-items: center;
+  width: 24px;
+  margin-left: -24px;
+  vertical-align: -2px;
+  cursor: pointer;
+  position: relative;
+}
+/* 28px hit area around the drawn box. */
+.cm-box::after {
+  content: "";
+  position: absolute;
+  left: -7px;
+  top: -7px;
+  width: 28px;
+  height: 28px;
+}
+.cm-check {
   display: inline-flex;
   align-items: center;
   justify-content: center;
   width: 14px;
   height: 14px;
-  margin-left: -24px;
-  margin-right: 10px;
-  vertical-align: -2px;
   border: 1.5px solid var(--box);
   border-radius: 4px;
   color: var(--ink-3);
-  cursor: pointer;
-  position: relative;
-}
-/* 28px hit area without changing the drawn box. */
-.cm-box::after {
-  content: "";
-  position: absolute;
-  inset: -7px;
 }
 @media (hover: hover) and (pointer: fine) {
-  .cm-box:hover {
+  .cm-box:hover .cm-check {
     border-color: var(--ink-2);
     background: var(--hover);
   }
 }
-.cm-box-snooze {
+.cm-box-snooze .cm-check {
   border-radius: 50%;
 }
 

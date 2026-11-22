@@ -6,6 +6,9 @@ import { Annotation } from "@codemirror/state";
 import type { EditorView, ViewUpdate } from "@codemirror/view";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+import { getCurrentWindow } from "@tauri-apps/api/window";
+
+type ResizeDirection = Parameters<ReturnType<typeof getCurrentWindow>["startResizeDragging"]>[0];
 import { collectReminders } from "@catio/core";
 import { createEditor, replaceDoc } from "./editor";
 
@@ -73,18 +76,44 @@ async function onExternalChange(text: string) {
   scheduleReminders(text);
 }
 
+function hidePad() {
+  if (dirty) void save();
+  invoke("hide_pad").catch(console.error);
+}
+
+/** Window chrome: hover controls, double-click strip (handled by Tauri), F11, resize edges. */
+function setupWindowChrome() {
+  const win = getCurrentWindow();
+  const syncMax = async () => document.body.classList.toggle("is-max", await win.isMaximized());
+  document.getElementById("btn-max")!.addEventListener("click", () => void win.toggleMaximize());
+  // No taskbar button, so "minimize" and "close" both tuck the pad into the tray:
+  // a real minimize would strand it, and quitting would stop reminders. Quit lives in the tray menu.
+  document.getElementById("btn-min")!.addEventListener("click", hidePad);
+  document.getElementById("btn-hide")!.addEventListener("click", hidePad);
+  window.addEventListener("keydown", (e) => {
+    if (e.key === "F11") {
+      e.preventDefault();
+      void win.toggleMaximize();
+    }
+  });
+  document.querySelectorAll<HTMLElement>(".rz").forEach((el) =>
+    el.addEventListener("mousedown", (e) => {
+      if (e.button !== 0) return;
+      e.preventDefault();
+      void win.startResizeDragging(el.dataset.dir as ResizeDirection);
+    }),
+  );
+  void win.onResized(() => void syncMax());
+  void syncMax();
+}
+
 async function boot() {
+  setupWindowChrome();
   const { text } = await invoke<{ path: string; text: string }>("load_doc");
   view = createEditor(
     document.getElementById("editor")!,
     text,
-    {
-      onSave: () => void save(),
-      onHide: () => {
-        if (dirty) void save();
-        invoke("hide_pad").catch(console.error);
-      },
-    },
+    { onSave: () => void save(), onHide: hidePad },
     onChange,
   );
   view.focus();
