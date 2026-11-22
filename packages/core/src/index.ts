@@ -115,6 +115,37 @@ export function toggleLine(text: string): string {
   return `${head}[ ] ${body}`;
 }
 
+/** "nanti": [ ] → [>] (until tomorrow), [>] → [ ]. Other lines unchanged. */
+export function toggleSnooze(text: string): string {
+  const p = parseLine(text);
+  const head = text.slice(0, p.indent);
+  const body = text.slice(p.bodyFrom);
+  if (p.kind === "todo") return `${head}[>] ${body}`;
+  if (p.kind === "snooze") return `${head}[ ] ${body}`;
+  return text;
+}
+
+/** The 04:00 reset: every snoozed line comes back as an open to-do. */
+export function wakeSnoozed(lines: readonly string[]): string[] {
+  return lines.map((l) => (parseLine(l).kind === "snooze" ? toggleSnooze(l) : l));
+}
+
+/** Most recent 04:00 at or before `now`: the day boundary for snoozes. */
+export function lastDayStart(now: Date): Date {
+  const d = new Date(now);
+  d.setHours(4, 0, 0, 0);
+  if (d.getTime() > now.getTime()) d.setDate(d.getDate() - 1);
+  return d;
+}
+
+/** Focus zone summary used for the "fokus beres" state. */
+export function focusDone(doc: ParsedDoc): boolean {
+  if (doc.dividerIndex <= 0) return false;
+  const focus = doc.lines.slice(0, doc.dividerIndex);
+  const tasks = focus.filter((l) => l.kind === "todo" || l.kind === "done" || l.kind === "snooze");
+  return tasks.length > 0 && !tasks.some((l) => l.kind === "todo");
+}
+
 export interface Reminder {
   line: number;
   label: string;

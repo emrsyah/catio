@@ -2,6 +2,10 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
   collectReminders,
+  focusDone,
+  lastDayStart,
+  toggleSnooze,
+  wakeSnoozed,
   normalizeMarker,
   parseDoc,
   parseLine,
@@ -65,6 +69,18 @@ test("reminders only for open to-dos", () => {
   assert.equal(r.length, 1);
   assert.equal(r[0].label, "call dokter");
   assert.equal(new Date(r[0].at).getHours(), 15);
+});
+
+test("snooze, wake at 04:00, focus done", () => {
+  assert.equal(toggleSnooze("[ ] cek ongkir"), "[>] cek ongkir");
+  assert.equal(toggleSnooze("[>] cek ongkir"), "[ ] cek ongkir");
+  assert.equal(toggleSnooze("[x] done"), "[x] done");
+  assert.deepEqual(wakeSnoozed(["[>] a", "[x] b", "c"]), ["[ ] a", "[x] b", "c"]);
+  assert.equal(lastDayStart(new Date(2026, 10, 22, 3, 0)).getDate(), 21);
+  assert.equal(lastDayStart(new Date(2026, 10, 22, 9, 0)).getDate(), 22);
+  assert.equal(focusDone(parseDoc(["[x] a", "[>] b", "---", "[ ] c"])), true);
+  assert.equal(focusDone(parseDoc(["[x] a", "[ ] b", "---"])), false);
+  assert.equal(focusDone(parseDoc(["catatan", "---"])), false);
 });
 
 function pick(t: { hour: number; minute: number; ambiguous: boolean } | null) {

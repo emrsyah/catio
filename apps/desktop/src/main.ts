@@ -7,12 +7,20 @@ import type { EditorView, ViewUpdate } from "@codemirror/view";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-
-type ResizeDirection = Parameters<ReturnType<typeof getCurrentWindow>["startResizeDragging"]>[0];
-import { collectReminders } from "@catio/core";
+import { collectReminders, lastDayStart, wakeSnoozed } from "@catio/core";
 import { createEditor, replaceDoc } from "./editor";
 
+type ResizeDirection = Parameters<ReturnType<typeof getCurrentWindow>["startResizeDragging"]>[0];
+
+interface Loaded {
+  path: string;
+  text: string;
+  first_run: boolean;
+}
+
 const SAVE_DEBOUNCE_MS = 300;
+const UNDO_WINDOW_MS = 8000;
+const WAKE_KEY = "catio.lastWake";
 const external = Annotation.define<boolean>();
 const statusEl = document.getElementById("status")!;
 
@@ -20,13 +28,41 @@ let view: EditorView;
 let saveTimer: number | undefined;
 let dirty = false;
 let statusTimer: number | undefined;
+/** An actionable status ("batal") disappears as soon as you keep typing. */
+let statusClearsOnEdit = false;
 
-function setStatus(text: string, tone: "quiet" | "accent" = "quiet", holdMs = 0) {
-  statusEl.textContent = text;
-  statusEl.dataset.tone = tone;
-  window.clearTimeout(statusTimer);
-  if (holdMs) statusTimer = window.setTimeout(() => (statusEl.textContent = ""), holdMs);
+// ---------- status strip ----------
+
+interface StatusAction {
+  label: string;
+  run: () => void;
 }
+
+function setStatus(text: string, tone: "quiet" | "accent" = "quiet", holdMs = 0, action?: StatusAction) {
+  statusEl.replaceChildren(text);
+  statusEl.dataset.tone = tone;
+  statusClearsOnEdit = false;
+  if (action) {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "status-action";
+    btn.textContent = action.label;
+    btn.addEventListener("click", () => {
+      action.run();
+      view.focus();
+    });
+    statusEl.append(" · ", btn);
+  }
+  window.clearTimeout(statusTimer);
+  if (holdMs) statusTimer = window.setTimeout(() => statusEl.replaceChildren(), holdMs);
+}
+
+/** "C:\Users\x\Documents\Catio\catio.md" → "Documents\Catio\catio.md" */
+function shortPath(path: string) {
+  return path.split(/[\\/]/).slice(-3).join("\\");
+}
+
+// ---------- saving ----------
 
 async function save() {
   window.clearTimeout(saveTimer);
@@ -34,7 +70,7 @@ async function save() {
   try {
     await invoke("save_doc", { text });
     dirty = false;
-    setStatus("tersimpan", "quiet", 1500);
+    if (!statusClearsOnEdit && !statusEl.querySelector(".status-action")) setStatus("tersimpan", "quiet", 1500);
   } catch (err) {
     console.error(err);
     setStatus("belum tersimpan · tekan Ctrl+S buat coba lagi", "accent");
@@ -53,6 +89,10 @@ function scheduleReminders(text: string) {
 function onChange(u: ViewUpdate) {
   if (!u.docChanged) return;
   if (u.transactions.some((t) => t.annotation(external))) return;
+  if (statusClearsOnEdit) {
+    statusClearsOnEdit = false;
+    statusEl.replaceChildren();
+  }
   dirty = true;
   window.clearTimeout(saveTimer);
   saveTimer = window.setTimeout(save, SAVE_DEBOUNCE_MS);
@@ -75,6 +115,74 @@ async function onExternalChange(text: string) {
   replaceDoc(view, text, { annotations: external.of(true) });
   scheduleReminders(text);
 }
+
+// ---------- Bersihin ----------
+
+function today() {
+  const d = new Date();
+  const p = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+}
+
+async function onCleaned(lines: string[], revert: () => boolean) {
+  try {
+    const block = await invoke<string>("archive_lines", { date: today(), lines });
+    setStatus(`${lines.length} yang selesai pindah ke arsip.md`, "quiet", UNDO_WINDOW_MS, {
+      label: "batal",
+      run: () => {
+        if (!revert()) return;
+        invoke("unarchive", { block }).catch(console.error);
+        setStatus("dibalikin", "quiet", 1500);
+      },
+    });
+    statusClearsOnEdit = true;
+  } catch (err) {
+    // Archive failed: put the lines back so nothing is lost.
+    console.error(err);
+    revert();
+    setStatus("arsip.md nggak bisa ditulis · yang selesai tetap di pad", "accent", 4000);
+  }
+}
+
+// ---------- snooze day boundary (04:00) ----------
+
+/** Snoozed lines come back as open to-dos once per day, at the first check after 04:00. */
+function wakeIfNewDay() {
+  const boundary = lastDayStart(new Date()).getTime();
+  let last = 0;
+  try {
+    last = Number(localStorage.getItem(WAKE_KEY)) || 0;
+  } catch {
+    /* treat as never */
+  }
+  if (last >= boundary) return;
+  const text = view.state.doc.toString();
+  const next = wakeSnoozed(text.split("\n")).join("\n");
+  if (next !== text) replaceDoc(view, next, { userEvent: "input.wake" });
+  try {
+    localStorage.setItem(WAKE_KEY, String(Date.now()));
+  } catch {
+    /* wakes again next check, harmless */
+  }
+}
+
+// ---------- folder ----------
+
+async function chooseFolder() {
+  if (dirty) await save();
+  try {
+    const res = await invoke<Loaded | null>("choose_folder", { current: view.state.doc.toString() });
+    if (!res) return;
+    replaceDoc(view, res.text, { annotations: external.of(true) });
+    scheduleReminders(res.text);
+    setStatus(`sekarang di ${shortPath(res.path)}`, "quiet", 4000);
+  } catch (err) {
+    console.error(err);
+    setStatus("folder itu nggak bisa dipakai · coba folder lain", "accent", 4000);
+  }
+}
+
+// ---------- window ----------
 
 function hidePad() {
   if (dirty) void save();
@@ -107,25 +215,42 @@ function setupWindowChrome() {
   void syncMax();
 }
 
+// ---------- boot ----------
+
 async function boot() {
   setupWindowChrome();
-  const { text } = await invoke<{ path: string; text: string }>("load_doc");
+  const { text, path, first_run } = await invoke<Loaded>("load_doc");
   view = createEditor(
     document.getElementById("editor")!,
     text,
-    { onSave: () => void save(), onHide: hidePad },
+    {
+      onSave: () => void save(),
+      onHide: hidePad,
+      onCleaned: (lines, revert) => void onCleaned(lines, revert),
+      onNothingToClean: () => setStatus("belum ada yang selesai", "quiet", 1500),
+    },
     onChange,
   );
   view.focus();
-  scheduleReminders(text);
+  wakeIfNewDay();
+  scheduleReminders(view.state.doc.toString());
+  if (first_run) {
+    setStatus(`disimpan di ${shortPath(path)}`, "quiet", 0, { label: "ganti", run: () => void chooseFolder() });
+    statusClearsOnEdit = true; // stays until you start writing
+  }
 
   await listen<string>("doc-changed", (e) => void onExternalChange(e.payload));
+  await listen("choose-folder", () => void chooseFolder());
   await listen("pad-shown", () => {
     view.focus();
+    wakeIfNewDay();
     scheduleReminders(view.state.doc.toString());
   });
   // The pad never quits, so "jam 9" written last night must still get scheduled today.
-  window.setInterval(() => scheduleReminders(view.state.doc.toString()), 5 * 60_000);
+  window.setInterval(() => {
+    wakeIfNewDay();
+    scheduleReminders(view.state.doc.toString());
+  }, 5 * 60_000);
   await listen<number>("focus-line", (e) => {
     const n = Math.min(Math.max(1, e.payload + 1), view.state.doc.lines);
     const ln = view.state.doc.line(n);

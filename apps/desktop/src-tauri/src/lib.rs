@@ -5,7 +5,7 @@ mod reminders;
 use serde::Serialize;
 use tauri::menu::{CheckMenuItem, Menu, MenuItem, PredefinedMenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
-use tauri::{AppHandle, Manager, State, WindowEvent};
+use tauri::{AppHandle, Emitter, Manager, State, WindowEvent};
 use tauri_plugin_autostart::{MacosLauncher, ManagerExt as _};
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, ShortcutState};
 use tauri_plugin_notification::NotificationExt;
@@ -21,12 +21,41 @@ const HOTKEY: &str = "ctrl+alt+n";
 struct Loaded {
     path: String,
     text: String,
+    first_run: bool,
 }
 
 #[tauri::command]
 fn load_doc(doc: State<DocState>) -> Result<Loaded, String> {
     let text = doc.load().map_err(|e| e.to_string())?;
-    Ok(Loaded { path: doc.path.display().to_string(), text })
+    Ok(Loaded { path: doc.path().display().to_string(), text, first_run: doc.first_run })
+}
+
+#[tauri::command]
+fn archive_lines(doc: State<DocState>, date: String, lines: Vec<String>) -> Result<String, String> {
+    doc.archive(&date, &lines).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn unarchive(doc: State<DocState>, block: String) -> Result<(), String> {
+    doc.unarchive(&block).map_err(|e| e.to_string())
+}
+
+/// Folder picker parented to the pad (so it isn't hidden behind an always-on-top window).
+/// Returns the new location and its text, or None when cancelled.
+#[tauri::command]
+async fn choose_folder(app: AppHandle, current: String) -> Result<Option<Loaded>, String> {
+    use tauri_plugin_dialog::DialogExt;
+    let mut dialog = app.dialog().file().set_title("Simpan catio.md di folder…");
+    if let Some(w) = app.get_webview_window(pad::LABEL) {
+        dialog = dialog.set_parent(&w);
+    }
+    let picked = tauri::async_runtime::spawn_blocking(move || dialog.blocking_pick_folder())
+        .await
+        .map_err(|e| e.to_string())?;
+    let Some(dir) = picked.and_then(|p| p.into_path().ok()) else { return Ok(None) };
+    let doc = app.state::<DocState>();
+    let text = doc.switch_folder(&app, &dir, &current).map_err(|e| e.to_string())?;
+    Ok(Some(Loaded { path: doc.path().display().to_string(), text, first_run: false }))
 }
 
 #[tauri::command]
@@ -63,6 +92,7 @@ pub fn run() {
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_dialog::init())
         .manage(Reminders::default())
         .setup(|app| {
             let handle = app.handle().clone();
@@ -103,7 +133,16 @@ pub fn run() {
                 pad::hide(window.app_handle());
             }
         })
-        .invoke_handler(tauri::generate_handler![load_doc, save_doc, save_conflict_copy, set_reminders, hide_pad])
+        .invoke_handler(tauri::generate_handler![
+            load_doc,
+            save_doc,
+            save_conflict_copy,
+            set_reminders,
+            hide_pad,
+            archive_lines,
+            unarchive,
+            choose_folder
+        ])
         .run(tauri::generate_context!())
         .expect("error while running Catio");
 }
@@ -131,10 +170,11 @@ fn build_tray(app: &AppHandle) -> tauri::Result<()> {
     let autostart_on = app.autolaunch().is_enabled().unwrap_or(false);
     let autostart = CheckMenuItem::with_id(app, "autostart", "Jalan waktu Windows nyala", true, autostart_on, None::<&str>)?;
     let folder = MenuItem::with_id(app, "folder", "Buka folder catio.md", true, None::<&str>)?;
+    let move_folder = MenuItem::with_id(app, "move-folder", "Pindahin catio.md ke folder lain…", true, None::<&str>)?;
     let quit = MenuItem::with_id(app, "quit", "Keluar", true, None::<&str>)?;
     let sep = PredefinedMenuItem::separator(app)?;
     let sep2 = PredefinedMenuItem::separator(app)?;
-    let menu = Menu::with_items(app, &[&show, &sep, &protect, &autostart, &folder, &sep2, &quit])?;
+    let menu = Menu::with_items(app, &[&show, &sep, &protect, &autostart, &folder, &move_folder, &sep2, &quit])?;
 
     let protect_item = protect.clone();
     let autostart_item = autostart.clone();
@@ -156,8 +196,13 @@ fn build_tray(app: &AppHandle) -> tauri::Result<()> {
                 let _ = if on { al.enable() } else { al.disable() };
             }
             "folder" => {
-                let path = app.state::<DocState>().path.clone();
+                let path = app.state::<DocState>().path();
                 let _ = app.opener().reveal_item_in_dir(path);
+            }
+            "move-folder" => {
+                // The webview owns the current text, so it runs the picker and the switch.
+                pad::show(app);
+                let _ = app.emit("choose-folder", ());
             }
             "quit" => app.exit(0),
             _ => {}

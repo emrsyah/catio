@@ -14,32 +14,40 @@ import {
   keymap,
   placeholder,
 } from "@codemirror/view";
-import { defaultKeymap, history, historyKeymap, indentLess, indentMore } from "@codemirror/commands";
+import { defaultKeymap, history, historyKeymap, indentLess, indentMore, undo } from "@codemirror/commands";
 import { search, searchKeymap } from "@codemirror/search";
-import { parseLine, toggleLine } from "@catio/core";
+import { parseLine, toggleLine, toggleSnooze } from "@catio/core";
 
 export interface EditorHooks {
   onSave: () => void;
   onHide: () => void;
+  /** Bersihin removed these finished lines; `revert` puts them back if nothing changed since. */
+  onCleaned: (lines: string[], revert: () => boolean) => void;
+  onNothingToClean: () => void;
 }
+
+let currentHooks: EditorHooks;
 
 // ---------- focus zone: lines above the first "---" ----------
 
 interface Zone {
   divider: number; // 1-based line number, -1 when absent
   now: number; // 1-based line number of the first open to-do in focus, -1 when none
+  allDone: boolean; // focus has tasks and none are open
 }
 
 function computeZone(state: EditorState): Zone {
   const doc = state.doc;
   let now = -1;
+  let tasks = 0;
   // The focus zone is short by design, so this loop stops early on real documents.
   for (let n = 1; n <= doc.lines; n++) {
     const p = parseLine(doc.line(n).text);
-    if (p.kind === "divider") return { divider: n, now };
+    if (p.kind === "divider") return { divider: n, now, allDone: tasks > 0 && now === -1 };
+    if (p.markerFrom >= 0) tasks++;
     if (now === -1 && p.kind === "todo") now = n;
   }
-  return { divider: -1, now: -1 };
+  return { divider: -1, now: -1, allDone: false };
 }
 
 // ---------- widgets ----------
@@ -75,18 +83,63 @@ class BoxWidget extends WidgetType {
   }
 }
 
-class LabelWidget extends WidgetType {
-  constructor(readonly text: string) {
+/**
+ * Right gutter: the time (mono), plus a hover action. Open to-dos offer "nanti" (snooze
+ * until tomorrow); snoozed lines show "besok", which un-snoozes on click.
+ */
+class RightWidget extends WidgetType {
+  constructor(
+    readonly time: string | null,
+    readonly action: "nanti" | "besok" | null,
+  ) {
     super();
   }
-  eq(other: LabelWidget) {
-    return other.text === this.text;
+  eq(o: RightWidget) {
+    return o.time === this.time && o.action === this.action;
   }
   toDOM() {
     const el = document.createElement("span");
-    el.className = "cm-tag";
-    el.textContent = this.text;
+    el.className = "cm-right";
+    if (this.action) {
+      const a = document.createElement("span");
+      a.className = `cm-ract cm-ract-${this.action}`;
+      a.dataset.act = this.action === "nanti" ? "snooze" : "wake";
+      a.textContent = this.action;
+      a.title = this.action === "nanti" ? "Tunda sampai besok (Ctrl+Shift+Enter)" : "Balikin sekarang";
+      el.appendChild(a);
+    }
+    if (this.time) {
+      const t = document.createElement("span");
+      t.className = "cm-rtime";
+      t.textContent = this.time;
+      el.appendChild(t);
+    }
     return el;
+  }
+  ignoreEvent() {
+    return false;
+  }
+}
+
+/** Sits on the --- rule when every focus task is done: points at Bersihin. */
+class FocusDoneWidget extends WidgetType {
+  eq() {
+    return true;
+  }
+  toDOM() {
+    const el = document.createElement("span");
+    el.className = "cm-focusdone";
+    el.append("fokus beres · ");
+    const a = document.createElement("span");
+    a.className = "cm-ract cm-ract-link";
+    a.dataset.act = "clean";
+    a.textContent = "bersihin";
+    a.title = "Pindahin yang selesai ke arsip.md (Ctrl+Shift+Backspace)";
+    el.append(a, " buat mulai fokus baru");
+    return el;
+  }
+  ignoreEvent() {
+    return false;
   }
 }
 
@@ -95,12 +148,24 @@ const boxes = {
   done: Decoration.replace({ widget: new BoxWidget("done") }),
   snooze: Decoration.replace({ widget: new BoxWidget("snooze") }),
 };
-const besok = Decoration.widget({ widget: new LabelWidget("besok"), side: 1 });
 const timeMark = Decoration.mark({ class: "cm-time" });
+const hideToken = Decoration.replace({});
+const focusDoneDeco = Decoration.widget({ widget: new FocusDoneWidget(), side: 1 });
 const line = (cls: string) => Decoration.line({ class: cls });
+
+function activeLines(state: EditorState): Set<number> {
+  const set = new Set<number>();
+  for (const r of state.selection.ranges) {
+    const a = state.doc.lineAt(r.from).number;
+    const b = state.doc.lineAt(r.to).number;
+    for (let n = a; n <= b; n++) set.add(n);
+  }
+  return set;
+}
 
 function buildDecorations(view: EditorView): DecorationSet {
   const zone = computeZone(view.state);
+  const active = activeLines(view.state);
   const out: Range<Decoration>[] = [];
   for (const { from, to } of view.visibleRanges) {
     let pos = from;
@@ -115,15 +180,32 @@ function buildDecorations(view: EditorView): DecorationSet {
       if (p.kind === "snooze") classes.push("cm-snooze");
       if (p.markerFrom >= 0) classes.push("cm-task");
       if (p.kind === "text") classes.push("cm-text");
-      if (classes.length) out.push(line(classes.join(" ")).range(ln.from));
 
       if (p.markerFrom >= 0 && (p.kind === "todo" || p.kind === "done" || p.kind === "snooze")) {
         out.push(boxes[p.kind].range(ln.from + p.markerFrom, ln.from + p.bodyFrom));
       }
-      if (p.time && p.kind !== "done") {
-        out.push(timeMark.range(ln.from + p.time.from, ln.from + p.time.to));
+
+      // Time moves to the right gutter, except on the line you're editing (raw text is clearer there).
+      let rightTime: string | null = null;
+      if (p.time) {
+        if (active.has(ln.number)) {
+          out.push(timeMark.range(ln.from + p.time.from, ln.from + p.time.to));
+        } else {
+          rightTime = ln.text.slice(p.time.from, p.time.to);
+          const start = p.time.from > 0 && ln.text[p.time.from - 1] === " " ? p.time.from - 1 : p.time.from;
+          out.push(hideToken.range(ln.from + start, ln.from + p.time.to));
+        }
       }
-      if (p.kind === "snooze") out.push(besok.range(ln.to));
+      const action = p.kind === "todo" ? "nanti" : p.kind === "snooze" ? "besok" : null;
+      if (rightTime || action) {
+        classes.push("cm-has-right");
+        out.push(Decoration.widget({ widget: new RightWidget(rightTime, action), side: 1 }).range(ln.to));
+      }
+      if (p.kind === "divider" && zone.allDone && ln.number === zone.divider) {
+        classes.push("cm-divider-label");
+        out.push(focusDoneDeco.range(ln.to));
+      }
+      if (classes.length) out.push(line(classes.join(" ")).range(ln.from));
       pos = ln.to + 1;
     }
   }
@@ -137,7 +219,7 @@ const decorations = ViewPlugin.fromClass(
       this.decorations = buildDecorations(view);
     }
     update(u: ViewUpdate) {
-      if (u.docChanged || u.viewportChanged) this.decorations = buildDecorations(u.view);
+      if (u.docChanged || u.viewportChanged || u.selectionSet) this.decorations = buildDecorations(u.view);
     }
   },
   {
@@ -152,6 +234,14 @@ const decorations = ViewPlugin.fromClass(
       mousedown(e, view) {
         if (e.button !== 0) return false;
         const target = e.target as HTMLElement;
+        const act = target.closest<HTMLElement>(".cm-ract");
+        if (act) {
+          e.preventDefault();
+          const n = view.state.doc.lineAt(view.posAtDOM(act)).number;
+          if (act.dataset.act === "clean") bersihin(view);
+          else snoozeAt(view, [n]);
+          return true;
+        }
         const box = target.closest<HTMLElement>(".cm-box");
         const lineEl = target.closest<HTMLElement>(".cm-line");
         // The left gutter is the drag handle for every line; the box is one too.
@@ -314,6 +404,51 @@ const toggleCommand = (view: EditorView) => {
   return true;
 };
 
+function snoozeAt(view: EditorView, lineNumbers: number[]) {
+  const changes = lineNumbers.flatMap((n) => {
+    const ln = view.state.doc.line(n);
+    const next = toggleSnooze(ln.text);
+    return next === ln.text ? [] : [{ from: ln.from, to: ln.to, insert: next }];
+  });
+  if (changes.length) view.dispatch({ changes, userEvent: "input.snooze" });
+}
+
+/** Ctrl+Shift+Enter: "nanti" — snooze until 04:00 tomorrow, or wake a snoozed line. */
+const snoozeCommand = (view: EditorView) => {
+  snoozeAt(view, selectedLines(view.state));
+  return true;
+};
+
+/**
+ * Bersihin (Ctrl+Shift+Backspace): finished lines leave the pad and go to arsip.md.
+ * One transaction, so "batal" is a plain undo while nothing else has changed.
+ */
+export function bersihin(view: EditorView): boolean {
+  const doc = view.state.doc;
+  const removed: string[] = [];
+  const changes: { from: number; to: number }[] = [];
+  for (let n = 1; n <= doc.lines; n++) {
+    const ln = doc.line(n);
+    if (parseLine(ln.text).kind !== "done") continue;
+    removed.push(ln.text.trim());
+    // Take the line with its newline; the last line takes the newline before it.
+    if (n < doc.lines) changes.push({ from: ln.from, to: ln.to + 1 });
+    else changes.push({ from: Math.max(0, ln.from - 1), to: ln.to });
+  }
+  if (!removed.length) {
+    currentHooks.onNothingToClean();
+    return true;
+  }
+  view.dispatch({ changes, userEvent: "delete.clean" });
+  const after = view.state.doc;
+  currentHooks.onCleaned(removed, () => {
+    if (view.state.doc !== after) return false;
+    undo(view);
+    return true;
+  });
+  return true;
+}
+
 /** Enter continues a to-do list; Enter on an empty to-do ends the list. Keeps indentation. */
 const smartEnter = (view: EditorView) => {
   const { state } = view;
@@ -412,9 +547,12 @@ const zoomHandlers = EditorView.domEventHandlers({
 
 export function createEditor(parent: HTMLElement, doc: string, hooks: EditorHooks, onChange: (u: ViewUpdate) => void) {
   applyZoom();
+  currentHooks = hooks;
   const catioKeymap = keymap.of([
     { key: "Enter", run: smartEnter },
     { key: "Mod-Enter", run: toggleCommand },
+    { key: "Mod-Shift-Enter", run: snoozeCommand },
+    { key: "Mod-Shift-Backspace", run: bersihin, preventDefault: true },
     { key: "Tab", run: indentMore, shift: indentLess },
     { key: "Mod-s", run: () => (hooks.onSave(), true), preventDefault: true },
     { key: "Mod-=", run: () => applyZoom(fontSize + 1) },
