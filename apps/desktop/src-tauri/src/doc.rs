@@ -20,7 +20,7 @@ const ARCHIVE: &str = "arsip.md";
 const TRASH: &str = ".terhapus";
 
 const STARTER: &str = "[ ] coba centang baris ini pakai Ctrl+Enter
-[ ] baris di atas garis --- itu fokus hari ini
+[ ] baris di atas garis --- itu fokus kamu sekarang
 ---
 catatan bebas di bawah garis.
 tulis jam di to-do, misal [ ] call dokter 15:00, nanti diingetin.
@@ -36,6 +36,12 @@ struct Config {
     /// Menu order (creation order). Files found on disk but missing here go at the end.
     #[serde(default)]
     order: Vec<String>,
+}
+
+#[derive(Clone, Serialize)]
+struct DocChanged {
+    pad: String,
+    text: String,
 }
 
 #[derive(Serialize)]
@@ -315,7 +321,8 @@ impl DocState {
                 }
                 *last = text.clone();
             }
-            let _ = app.emit("doc-changed", text);
+            // Name the pad: a late event after a switch must not land in the pad now on screen.
+            let _ = app.emit("doc-changed", DocChanged { pad: active, text });
         })?;
         watcher.watch(&dir, RecursiveMode::NonRecursive)?;
         *self.watcher.lock().unwrap() = Some(watcher);

@@ -571,7 +571,10 @@ async function boot() {
     statusClearsOnEdit = true; // stays until you start writing
   }
 
-  await listen<string>("doc-changed", (e) => void onExternalChange(e.payload));
+  await listen<{ pad: string; text: string }>("doc-changed", (e) => {
+    if (e.payload.pad === pad) void onExternalChange(e.payload.text);
+    else void refreshPads(); // stale event from the pad you just left
+  });
   // Another pad's file changed (Notepad, phone sync, a pad added in Explorer).
   await listen("pads-changed", () => void refreshPads());
   await listen("choose-folder", () => void chooseFolder());

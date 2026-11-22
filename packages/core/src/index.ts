@@ -86,16 +86,22 @@ const DATE_RULES: DateRule[] = [
     make: (m) => ({ kind: "abs", day: +m[1], month: MONTHS[m[2].toLowerCase()], year: m[3] ? +m[3] : undefined }),
   },
   {
-    // 25/11, 25/11/2026
-    re: /(?<![\d/])(\d{1,2})\/(\d{1,2})(?:\/(\d{4}|\d{2}))?(?![\d/])/,
+    // 25/11/2026, 25/11/26. A bare "25/11" needs "tgl" in front (below): "1/2 kg",
+    // "skor 8/10" and "24/7" are not dates.
+    re: /(?<![\d/])(\d{1,2})\/(\d{1,2})\/(\d{4}|\d{2})(?![\d/])/,
     make: (m) =>
       +m[2] >= 1 && +m[2] <= 12
-        ? { kind: "abs", day: +m[1], month: +m[2] - 1, year: m[3] ? (m[3].length === 2 ? 2000 + +m[3] : +m[3]) : undefined }
+        ? { kind: "abs", day: +m[1], month: +m[2] - 1, year: m[3].length === 2 ? 2000 + +m[3] : +m[3] }
         : null,
   },
   {
+    // tgl 25/11, tanggal 25/11
+    re: /(?<![\p{L}])(?:tgl|tanggal)\.?\s+(\d{1,2})\/(\d{1,2})(?![\d/])/iu,
+    make: (m) => (+m[2] >= 1 && +m[2] <= 12 ? { kind: "abs", day: +m[1], month: +m[2] - 1 } : null),
+  },
+  {
     // tgl 25, tanggal 25
-    re: /(?<![\p{L}])(?:tgl|tanggal)\.?\s+(\d{1,2})(?!\d)/iu,
+    re: /(?<![\p{L}])(?:tgl|tanggal)\.?\s+(\d{1,2})(?![\d/])/iu,
     make: (m) => ({ kind: "abs", day: +m[1] }),
   },
   {
@@ -150,7 +156,8 @@ export function parseLine(text: string): ParsedLine {
     markerFrom = m[1].length;
     bodyFrom = m[0].length;
   }
-  const date = findDate(text, bodyFrom);
+  // Dates only count on task lines: in a note, "kalau besok hujan" is just a sentence.
+  const date = markerFrom >= 0 ? findDate(text, bodyFrom) : null;
   let time = findTime(text, bodyFrom);
   // A token can't be both (e.g. digits inside "25 nov 2026").
   if (time && date && time.from < date.to && date.from < time.to) time = null;
@@ -331,7 +338,6 @@ export function resolveWhen(p: Pick<ParsedLine, "date" | "time">, now: Date): Da
   if (!p.date) return p.time ? resolveTime(p.time, now) : null;
   const day = resolveDate(p.date, now);
   if (!day) return null;
-  if (!p.time && startOfDay(now).getTime() === day.getTime()) return null; // "hari ini" without a time
   if (p.time && day.getTime() === startOfDay(now).getTime()) return resolveTime(p.time, now);
   const d = new Date(day);
   // A day without a time reminds you at 09:00 that morning.
@@ -399,7 +405,8 @@ export function commitWhen(text: string, now: Date): string | null {
   const p = parseLine(text);
   if (p.kind !== "todo") return null;
   const edits: { from: number; to: number; insert: string }[] = [];
-  if (p.date && p.date.kind !== "abs") {
+  // "tgl 25" drifts too (it rolls to next month once passed), so it gets locked as well.
+  if (p.date && (p.date.kind !== "abs" || p.date.month === undefined)) {
     const d = resolveDate(p.date, now);
     if (d) edits.push({ from: p.date.from, to: p.date.to, insert: formatDay(d, now) });
   }

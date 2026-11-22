@@ -106,7 +106,12 @@ test("dates: relative, weekday, absolute", () => {
   assert.equal(day("[ ] invoice 25 nov"), "25/11/2026");
   assert.equal(day("[ ] invoice 5 januari"), "5/1/2027", "January already passed → next year");
   assert.equal(day("[ ] invoice 20 nov"), "20/11/2026", "recent past stays (overdue)");
-  assert.equal(day("[ ] invoice 25/12"), "25/12/2026");
+  assert.equal(day("[ ] invoice tgl 25/12"), "25/12/2026");
+  assert.equal(day("[ ] invoice 25/12/2026"), "25/12/2026");
+  assert.equal(parseLine("[ ] beli 1/2 kg").date, null, "fractions aren't dates");
+  assert.equal(parseLine("[ ] skor 8/10").date, null);
+  assert.equal(parseLine("[ ] support 24/7").date, null);
+  assert.equal(parseLine("kalau besok hujan batal").date, null, "notes keep their words");
   assert.equal(day("[ ] invoice tgl 5"), "5/12/2026", "day passed this month → next month");
   assert.equal(parseLine("[ ] seninnya").date, null);
   assert.equal(parseLine("[ ] versi 1/2/3/4").date, null);
@@ -125,7 +130,12 @@ test("resolveWhen combines day and time", () => {
   assert.equal(at("[ ] call 2 jam lagi"), "22 12:00");
   assert.equal(at("[ ] call 30 menit lagi"), "22 10:30");
   assert.equal(at("[ ] call setengah jam lagi"), "22 10:30");
-  assert.equal(at("[ ] call hari ini"), null);
+  assert.equal(at("[ ] call hari ini"), null, "09:00 already passed at 10:00");
+  // The day itself: a day-only reminder still fires at 09:00 if that's ahead.
+  const early = new Date(2026, 10, 23, 8, 0);
+  const d = resolveWhen(parseLine("[ ] bayar 23 nov"), early);
+  assert.equal(d && `${d.getDate()} ${d.getHours()}`, "23 9");
+  assert.equal(resolveWhen(parseLine("[ ] bayar 23 nov"), new Date(2026, 10, 23, 10, 0)), null);
   assert.equal(at("[ ] call 20 nov 15:00"), null, "passed");
   const r = collectReminders(["[ ] bayar listrik besok jam 3"], sun);
   assert.equal(r[0].label, "bayar listrik");
@@ -142,6 +152,7 @@ test("describeWhen and commitWhen", () => {
   assert.equal(commitWhen("[ ] bayar besok jam 3", sun), "[ ] bayar 23 nov jam 3");
   assert.equal(commitWhen("[ ] call 2 jam lagi", sun), "[ ] call 12:00");
   assert.equal(commitWhen("[ ] call 25 nov", sun), null, "already absolute");
+  assert.equal(commitWhen("[ ] invoice tgl 25", sun), "[ ] invoice 25 nov", "tgl N locks too");
   assert.equal(commitWhen("besok libur", sun), null, "notes are left alone");
 });
 
