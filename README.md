@@ -56,4 +56,4 @@ Mode dock: tombol ▣ di strip atau tray → pad ngecil jadi icon di pojok kanan
 
 Pindahin `catio.md` (misal ke OneDrive buat sinkron HP v0): tray → "Pindahin catio.md ke folder lain…".
 
-Belum ada: ganti hotkey dari UI, merge per baris kalau laptop & file berubah barengan (sekarang versi luar disimpan jadi `catio.conflict-*.md`), tombol "Tunda 5 mnt / Buka" di notifikasi, auto-sembunyi waktu ada app full screen, jam di gutter kanan (sekarang masih inline), Bersihin ke `arsip.md`, riwayat, sinkron HP.
+Belum ada: ganti hotkey dari UI, umur tugas ("2 hari", butuh riwayat), penanda konflik di gutter + "pakai versi HP/laptop" (sekarang versi luar disimpan jadi `catio.conflict-*.md`), auto-sembunyi waktu ada app full screen, `Ctrl+K` cari arsip, riwayat & pulihkan, sinkron HP.
