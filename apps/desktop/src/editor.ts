@@ -205,8 +205,12 @@ function buildDecorations(view: EditorView): DecorationSet {
           out.push(hideToken.range(ln.from + start, ln.from + p.time.to));
         }
       }
-      const action: RightAction | null =
-        p.kind === "todo" ? "nanti" : p.kind === "done" ? "hapus" : p.kind === "snooze" ? "besok" : null;
+      // An empty to-do gets no action: nothing to act on, and the caret would measure itself
+      // against the absolutely-positioned widget and jump to the right edge.
+      const empty = ln.text.slice(p.bodyFrom).trim() === "";
+      const action: RightAction | null = empty
+        ? null
+        : p.kind === "todo" ? "nanti" : p.kind === "done" ? "hapus" : p.kind === "snooze" ? "besok" : null;
       if (rightTime || action) {
         classes.push("cm-has-right");
         out.push(Decoration.widget({ widget: new RightWidget(rightTime, action), side: 1 }).range(ln.to));

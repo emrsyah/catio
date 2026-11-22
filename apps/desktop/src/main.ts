@@ -224,7 +224,7 @@ async function chooseFolder() {
 
 const DOCK_KEY = "catio.dock";
 const COLLAPSE_DELAY_MS = 350;
-const DOCK_CLOSE_MS = 200; // matches --dock-close: the card shrinks to the icon, then the window does
+const DOCK_CLOSE_MS = 260; // matches --dock-close: the card shrinks to the icon, then the window does
 let docked = false;
 let expanded = false; // window state, from Rust
 let collapseTimer: number | undefined;
@@ -247,7 +247,17 @@ function closeDock() {
   window.clearTimeout(collapseTimer);
   if (dirty) void save();
   body.classList.remove("is-open");
-  collapseTimer = window.setTimeout(() => invoke("dock_collapse").catch(console.error), DOCK_CLOSE_MS);
+  // Shrink the window only once the card has fully landed on the icon; cutting the last
+  // frames is what makes a close feel like it snaps. Timer is the fallback.
+  const shell = document.getElementById("shell")!;
+  const finish = () => {
+    shell.removeEventListener("transitionend", onEnd);
+    window.clearTimeout(collapseTimer);
+    if (!body.classList.contains("is-open")) invoke("dock_collapse").catch(console.error);
+  };
+  const onEnd = (e: TransitionEvent) => e.target === shell && e.propertyName === "clip-path" && finish();
+  shell.addEventListener("transitionend", onEnd);
+  collapseTimer = window.setTimeout(finish, DOCK_CLOSE_MS + 80);
 }
 
 function setDock(on: boolean) {

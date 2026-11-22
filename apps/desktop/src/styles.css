@@ -195,7 +195,7 @@ body {
   --dock-pad: 8px; /* keep in sync with PAD in dock.rs */
   --dock-icon: 48px;
   --dock-open: 300ms;
-  --dock-close: 200ms;
+  --dock-close: 260ms;
   --ease-drawer: cubic-bezier(0.32, 0.72, 0, 1);
   background: transparent;
 }
@@ -206,14 +206,13 @@ body {
 .is-docked .frame {
   position: fixed;
   inset: 0;
-  /* Crisp tactile edge that follows the clipped shape: ring, 1px drop, one short drop. */
-  filter: drop-shadow(0 0 0.5px rgb(31 30 28 / 0.3)) drop-shadow(0 1px 1px rgb(31 30 28 / 0.1))
-    drop-shadow(0 3px 4px rgb(31 30 28 / 0.12));
+  /* One crisp drop that follows the clipped shape (one layer: it repaints every frame). */
+  filter: drop-shadow(0 1px 2px rgb(31 30 28 / 0.28));
 }
 @media (prefers-color-scheme: dark) {
   .is-docked .frame {
-    filter: drop-shadow(0 0 0.5px #5a5650) drop-shadow(0 1px 2px rgb(0 0 0 / 0.5))
-      drop-shadow(0 3px 4px rgb(0 0 0 / 0.4));
+    /* Dark needs the 0.5px outline: a black drop alone vanishes on dark wallpapers. */
+    filter: drop-shadow(0 0 0.5px #5a5650) drop-shadow(0 1px 2px rgb(0 0 0 / 0.6));
   }
 }
 .is-docked .shell {
@@ -222,7 +221,8 @@ body {
   background: var(--bg);
   /* Closed: only the icon-sized square at the bottom-right corner shows. */
   clip-path: inset(calc(100% - var(--dock-icon)) 0 0 calc(100% - var(--dock-icon)) round 12px);
-  transition: clip-path var(--dock-close) var(--ease-out);
+  /* Same drawer curve both ways: a strong ease-out front-loads a big shrink into a jump. */
+  transition: clip-path var(--dock-close) var(--ease-drawer);
 }
 .is-docked.is-open .shell {
   clip-path: inset(0 round 10px);
@@ -234,6 +234,7 @@ body {
   opacity: 0;
   pointer-events: none;
   transition: opacity var(--t-fast) var(--ease-out);
+  will-change: opacity; /* own layers, so the fade doesn't repaint the editor */
 }
 .is-docked.is-open .strip,
 .is-docked.is-open #editor {
@@ -253,7 +254,8 @@ body {
   padding: 0;
   background: transparent;
   cursor: pointer;
-  transition: opacity var(--t) var(--ease-out) 40ms;
+  /* Comes back as the card arrives at icon size, not while it's still big. */
+  transition: opacity var(--t) var(--ease-out) 110ms;
 }
 .is-docked.is-open .dock-icon {
   opacity: 0;
