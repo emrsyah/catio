@@ -2,11 +2,30 @@
 
 Notepad yang ngerti isinya. Satu file teks, satu hotkey. Detail desain dan alasannya ada di [ARCHITECTURE.md](ARCHITECTURE.md).
 
+[![Rilis terbaru](https://img.shields.io/github/v/release/emrsyah/catio?label=download&color=f97316)](https://github.com/emrsyah/catio/releases/latest)
+
 ## Download
 
-Ambil installer di [Releases](https://github.com/emrsyah/catio/releases/latest): `.exe` buat Windows, `.dmg` buat macOS (`aarch64` = M1 ke atas, `x64` = Intel), `.AppImage` / `.deb` / `.rpm` buat Linux. Build-nya belum ditandatangani: di Windows klik "More info → Run anyway", di macOS jalanin `xattr -cr /Applications/Catio.app` sekali kalau muncul "rusak".
+| OS | File | |
+|---|---|---|
+| Windows 10/11 | Installer `.exe` | [Download](https://github.com/emrsyah/catio/releases/download/v0.1.0/Catio_0.1.0_x64-setup.exe) |
+| macOS Apple Silicon (M1 ke atas) | `.dmg` | [Download](https://github.com/emrsyah/catio/releases/download/v0.1.0/Catio_0.1.0_aarch64.dmg) |
+| macOS Intel | `.dmg` | [Download](https://github.com/emrsyah/catio/releases/download/v0.1.0/Catio_0.1.0_x64.dmg) |
+| Linux (semua distro) | `.AppImage` | [Download](https://github.com/emrsyah/catio/releases/download/v0.1.0/Catio_0.1.0_amd64.AppImage) |
+| Ubuntu / Debian | `.deb` | [Download](https://github.com/emrsyah/catio/releases/download/v0.1.0/Catio_0.1.0_amd64.deb) |
+| Fedora / openSUSE | `.rpm` | [Download](https://github.com/emrsyah/catio/releases/download/v0.1.0/Catio-0.1.0-1.x86_64.rpm) |
 
-Rilis baru: naikin `version` di `apps/desktop/src-tauri/tauri.conf.json` (dan `Cargo.toml`), terus `git tag v0.1.0 && git push origin v0.1.0`. GitHub Actions (`.github/workflows/release.yml`) nge-build ketiga OS dan nempelin installernya ke rilis.
+Semua versi ada di [Releases](https://github.com/emrsyah/catio/releases).
+
+Installer-nya belum ditandatangani, jadi bakal ada peringatan pertama kali:
+
+- **Windows:** SmartScreen → "More info" → "Run anyway".
+- **macOS:** buka `.dmg`, tarik Catio ke Applications. Kalau muncul "rusak / tidak bisa dibuka", jalanin sekali di Terminal: `xattr -cr /Applications/Catio.app`.
+- **Linux AppImage:** `chmod +x Catio_*.AppImage`, terus jalanin.
+
+Habis install, tekan `Ctrl+Alt+N` buat munculin pad.
+
+**Bikin rilis baru:** naikin `version` di `apps/desktop/src-tauri/tauri.conf.json` dan `Cargo.toml`, ganti `0.1.0` di link tabel atas, terus `git tag vX.Y.Z && git push origin vX.Y.Z`. GitHub Actions (`.github/workflows/release.yml`) nge-build semua OS dan nempelin installernya ke rilis.
 
 ## Jalanin
 
