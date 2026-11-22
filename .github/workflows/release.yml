@@ -1,0 +1,85 @@
+# Builds Catio for Windows, macOS (Apple Silicon + Intel) and Linux, and attaches the
+# installers to a GitHub release. Push a tag to cut one:
+#
+#   git tag v0.1.0 && git push origin v0.1.0
+#
+# The tag must match "version" in apps/desktop/src-tauri/tauri.conf.json.
+# Can also be run by hand from the Actions tab (makes a draft release for the current version).
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    permissions:
+      contents: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: windows-latest
+            args: --bundles nsis
+          - platform: macos-latest
+            args: --target aarch64-apple-darwin --bundles dmg
+          - platform: macos-latest
+            args: --target x86_64-apple-darwin --bundles dmg
+          - platform: ubuntu-22.04
+            args: --bundles deb,appimage,rpm
+    runs-on: ${{ matrix.platform }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4 # version comes from "packageManager" in package.json
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.platform == 'macos-latest' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
+
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: apps/desktop/src-tauri -> target
+          key: ${{ matrix.args }}
+
+      - name: Linux build dependencies
+        if: matrix.platform == 'ubuntu-22.04'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev libxdo-dev libssl-dev patchelf
+
+      - run: pnpm install --frozen-lockfile
+
+      - run: pnpm test
+
+      - uses: tauri-apps/tauri-action@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          projectPath: apps/desktop
+          tagName: ${{ github.ref_type == 'tag' && github.ref_name || 'v__VERSION__' }}
+          releaseName: Catio v__VERSION__
+          releaseBody: |
+            Download sesuai OS kamu:
+
+            - **Windows**: `Catio_*_x64-setup.exe`
+            - **macOS Apple Silicon (M1 ke atas)**: `Catio_*_aarch64.dmg`
+            - **macOS Intel**: `Catio_*_x64.dmg`
+            - **Linux**: `.AppImage` (semua distro), `.deb` (Ubuntu/Debian), `.rpm` (Fedora)
+
+            Build ini belum ditandatangani:
+            - Windows: SmartScreen → "More info" → "Run anyway".
+            - macOS: kalau muncul "rusak / tidak bisa dibuka", jalankan `xattr -cr /Applications/Catio.app` sekali.
+          releaseDraft: ${{ github.ref_type != 'tag' }}
+          prerelease: false
+          args: ${{ matrix.args }}

@@ -2,6 +2,12 @@
 
 Notepad yang ngerti isinya. Satu file teks, satu hotkey. Detail desain dan alasannya ada di [ARCHITECTURE.md](ARCHITECTURE.md).
 
+## Download
+
+Ambil installer di [Releases](https://github.com/emrsyah/catio/releases/latest): `.exe` buat Windows, `.dmg` buat macOS (`aarch64` = M1 ke atas, `x64` = Intel), `.AppImage` / `.deb` / `.rpm` buat Linux. Build-nya belum ditandatangani: di Windows klik "More info → Run anyway", di macOS jalanin `xattr -cr /Applications/Catio.app` sekali kalau muncul "rusak".
+
+Rilis baru: naikin `version` di `apps/desktop/src-tauri/tauri.conf.json` (dan `Cargo.toml`), terus `git tag v0.1.0 && git push origin v0.1.0`. GitHub Actions (`.github/workflows/release.yml`) nge-build ketiga OS dan nempelin installernya ke rilis.
+
 ## Jalanin
 
 Butuh: Node 20+, pnpm 10, Rust stable (MSVC), WebView2 (bawaan Windows 11).

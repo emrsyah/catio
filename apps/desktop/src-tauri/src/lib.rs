@@ -311,7 +311,7 @@ fn build_tray(app: &AppHandle) -> tauri::Result<()> {
     app.manage(IdleMenu(idle.clone()));
     let protect = CheckMenuItem::with_id(app, "protect", "Sembunyiin dari share screen", true, !cfg!(debug_assertions), None::<&str>)?;
     let autostart_on = app.autolaunch().is_enabled().unwrap_or(false);
-    let autostart = CheckMenuItem::with_id(app, "autostart", "Jalan waktu Windows nyala", true, autostart_on, None::<&str>)?;
+    let autostart = CheckMenuItem::with_id(app, "autostart", if cfg!(windows) { "Jalan waktu Windows nyala" } else { "Jalan waktu komputer nyala" }, true, autostart_on, None::<&str>)?;
     let folder = MenuItem::with_id(app, "folder", "Buka folder Catio", true, None::<&str>)?;
     let move_folder = MenuItem::with_id(app, "move-folder", "Pindahin folder Catio…", true, None::<&str>)?;
     let quit = MenuItem::with_id(app, "quit", "Keluar", true, None::<&str>)?;
