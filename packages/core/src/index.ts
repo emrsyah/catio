@@ -481,6 +481,46 @@ export function insertCaptured(lines: readonly string[], line: string): { lines:
   return { lines: out, index: out.length - 1 };
 }
 
+/**
+ * Text sent to a pad from outside the editor (quick capture, an agent): one entry per
+ * non-blank line, "[]" fixed, and drifting words ("jumat", "2 jam lagi") locked to a date,
+ * since nobody "leaves" these lines for the editor to do it.
+ */
+export function prepareCapture(raw: string, now: Date): string[] {
+  return raw
+    .split(/\r?\n/)
+    .map((l) => l.trimEnd())
+    .filter((l) => l.trim())
+    .map((l) => {
+      const marked = normalizeMarker(l) ?? l;
+      return commitWhen(marked, now) ?? marked;
+    });
+}
+
+/** Several captured lines under "---", in the order given. */
+export function insertAllCaptured(lines: readonly string[], captured: readonly string[]): string[] {
+  let out = [...lines];
+  for (const l of [...captured].reverse()) out = insertCaptured(out, l).lines;
+  return out;
+}
+
+/** The line still holding `text`: at its old index, else the nearest copy (lines above may have moved). */
+export function findLine(lines: readonly string[], index: number, text: string): number {
+  if (lines[index] === text) return index;
+  let best = -1;
+  lines.forEach((l, i) => {
+    if (l === text && (best === -1 || Math.abs(i - index) < Math.abs(best - index))) best = i;
+  });
+  return best;
+}
+
+/** Marks a to-do done ([x]) or open ([ ]); snoozed counts as open. Null for lines that aren't to-dos. */
+export function setDone(text: string, done: boolean): string | null {
+  const p = parseLine(text);
+  if (p.kind !== "todo" && p.kind !== "done" && p.kind !== "snooze") return null;
+  return `${text.slice(0, p.indent)}[${done ? "x" : " "}] ${text.slice(p.bodyFrom)}`;
+}
+
 /** Moves a line to the end of the focus zone (just above "---"), or to the top without one. */
 export function moveToFocus(lines: readonly string[], index: number): { lines: string[]; index: number } {
   const out = [...lines];

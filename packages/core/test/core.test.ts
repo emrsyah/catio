@@ -4,6 +4,10 @@ import {
   collectReminders,
   commitWhen,
   describeWhen,
+  findLine,
+  insertAllCaptured,
+  prepareCapture,
+  setDone,
   resolveDate,
   resolveWhen,
   focusDone,
@@ -242,6 +246,20 @@ test("search ranks open to-dos and filters", () => {
   assert.deepEqual(search(index, "", { kind: "tag", tag: "#kerja" }).length, 1);
   assert.deepEqual(topTags(index), ["#kerja", "@dina"]);
   assert.deepEqual(search(index, "venue sama")[0].ranges, [[15, 20], [21, 25]]);
+});
+
+test("lines sent from outside the editor: capture prep, insert, find, set done", () => {
+  const now = new Date(2026, 10, 22, 10, 0); // Sunday
+  assert.deepEqual(prepareCapture("[] call dina besok\r\n\n  catatan aja  \n", now), ["[ ] call dina 23 nov", "  catatan aja"]);
+  assert.deepEqual(insertAllCaptured(["[ ] a", "---", "x"], ["[ ] b", "[ ] c"]), ["[ ] a", "---", "[ ] b", "[ ] c", "x"]);
+  const lines = ["[ ] a", "[ ] b", "[ ] a"];
+  assert.equal(findLine(lines, 2, "[ ] a"), 2);
+  assert.equal(findLine(["new", ...lines], 2, "[ ] b"), 2, "nearest copy after a shift");
+  assert.equal(findLine(lines, 0, "gone"), -1);
+  assert.equal(setDone("  [ ] a 15:00", true), "  [x] a 15:00");
+  assert.equal(setDone("[>] a", true), "[x] a");
+  assert.equal(setDone("[x] a", false), "[ ] a");
+  assert.equal(setDone("plain note", true), null);
 });
 
 function pick(t: { hour: number; minute: number; ambiguous: boolean } | null) {

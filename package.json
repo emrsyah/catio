@@ -6,7 +6,8 @@
   "scripts": {
     "dev": "pnpm --filter @catio/desktop tauri dev",
     "build": "pnpm --filter @catio/desktop tauri build",
-    "test": "pnpm --filter @catio/core test",
-    "typecheck": "pnpm --filter @catio/desktop typecheck"
+    "test": "pnpm --filter @catio/core --filter @catio/mcp test",
+    "typecheck": "pnpm --filter @catio/desktop --filter @catio/mcp typecheck",
+    "mcp": "node packages/mcp/src/index.ts"
   }
 }

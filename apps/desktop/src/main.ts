@@ -10,12 +10,12 @@ import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import {
   collectReminders,
-  commitWhen,
   dayNumber,
-  insertCaptured,
+  findLine,
+  insertAllCaptured,
   lastDayStart,
   moveToFocus,
-  normalizeMarker,
+  prepareCapture,
   resolveDate,
   setDate,
   toggleLine,
@@ -239,16 +239,6 @@ async function transformPad(name: string, edit: (lines: string[]) => string[] | 
   scheduleReminders();
   padMenu.refresh();
   return out;
-}
-
-/** The line still holding `text`: at its old index, else the nearest copy (lines above may have moved). */
-function findLine(lines: string[], index: number, text: string): number {
-  if (lines[index] === text) return index;
-  let best = -1;
-  lines.forEach((l, i) => {
-    if (l === text && (best === -1 || Math.abs(i - index) < Math.abs(best - index))) best = i;
-  });
-  return best;
 }
 
 async function goTo(name: string, line: number) {
@@ -522,25 +512,9 @@ function wakeIfNewDay() {
 
 /** Lines typed in the capture window land under "---" in the pad on screen, saved at once. */
 async function onCaptured(raw: string) {
-  const now = new Date();
-  const lines = raw
-    .split(/\r?\n/)
-    .map((l) => l.trimEnd())
-    .filter((l) => l.trim())
-    .map((l) => {
-      const marked = normalizeMarker(l) ?? l;
-      return commitWhen(marked, now) ?? marked; // "jumat" must not drift: nobody "leaves" this line
-    });
+  const lines = prepareCapture(raw, new Date());
   if (!lines.length) return;
-  const out = await transformPad(
-    pad,
-    (cur) => {
-      let doc = cur;
-      for (const l of [...lines].reverse()) doc = insertCaptured(doc, l).lines;
-      return doc;
-    },
-    "input.capture",
-  );
+  const out = await transformPad(pad, (cur) => insertAllCaptured(cur, lines), "input.capture");
   if (out !== null) setStatus(lines.length === 1 ? `masuk ke pad ${pad}` : `${lines.length} baris masuk ke pad ${pad}`, "quiet", 2500);
 }
 

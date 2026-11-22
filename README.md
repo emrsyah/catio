@@ -92,10 +92,31 @@ Detail kecil lainnya:
 - Full screen (`F11`): kolom kiri isinya semua pad, "To-do terbuka", "Ada tanggal", "Nyangkut > 7 hari", dan tag.
 - Undo (`Ctrl+Z`) dan posisi kursor tiap pad tetap kesimpan waktu pindah pad.
 
+## Dipakai dari Claude Code (MCP)
+
+`packages/mcp` itu MCP server yang ngasih agent (Claude Code, Cursor, dll.) akses ke pad kamu. Butuh repo ini + Node 22.18 ke atas, tanpa build:
+
+```sh
+pnpm install
+claude mcp add --scope user catio -- node /path/ke/catio/packages/mcp/src/index.ts
+```
+
+| Tool | Fungsi |
+|---|---|
+| `list_pads` | Semua pad + jumlah to-do terbuka |
+| `read_pad` | Isi satu pad dengan nomor baris |
+| `open_todos` | To-do terbuka (fokus duluan), bisa disaring per pad, `#tag`, atau yang ada tanggal |
+| `add` | Tambah baris kayak tangkap cepat: masuk di bawah `---` (atau ke fokus). "besok", "jumat" dikunci jadi tanggal pasti |
+| `set_done` | Centang / buka lagi satu to-do |
+| `search` | Cari di semua pad + `arsip.md`, kayak `Ctrl+K` |
+
+Contoh: "tambahin to-do review PR #42 besok jam 10 di catio", "apa aja to-do fokus aku?", "centang yang soal onboarding". Pad yang lagi kebuka di app langsung ikut berubah. Foldernya sama kayak app (folder pilihan di tray, atau `Documents\Catio`); set `CATIO_DIR` buat folder lain.
+
 ## Struktur
 
 ```
 packages/core/          parser murni (TS, tanpa dependency) + test node:test
+packages/mcp/           MCP server buat agent (pakai core, nulis file kayak app)
 apps/desktop/           Vite + CodeMirror 6 (src/), Tauri v2 (src-tauri/)
   src/pads.ts                 menu pad (pindah, bikin, ganti nama, hapus)
   src/store.ts                teks tiap pad di-parse sekali per versi + umur to-do

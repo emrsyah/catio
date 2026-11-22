@@ -1,0 +1,27 @@
+{
+  "name": "@catio/mcp",
+  "version": "0.1.0",
+  "private": true,
+  "description": "MCP server for Catio pads: lets coding agents read, add and tick to-dos",
+  "type": "module",
+  "bin": {
+    "catio-mcp": "./src/index.ts"
+  },
+  "engines": {
+    "node": ">=22.18"
+  },
+  "scripts": {
+    "start": "node src/index.ts",
+    "test": "node --test \"test/*.test.ts\"",
+    "typecheck": "tsc -p ."
+  },
+  "dependencies": {
+    "@catio/core": "workspace:*",
+    "@modelcontextprotocol/sdk": "^1.32.2",
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "@types/node": "^24.19.2",
+    "typescript": "^5.9.3"
+  }
+}
