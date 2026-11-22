@@ -112,6 +112,57 @@ body {
 .rz-se { bottom: 0; right: 0; cursor: nwse-resize; }
 .is-max .rz { display: none; }
 
+/* ---------- dock mode ---------- */
+.dock-icon {
+  display: none;
+}
+.is-docked .rz,
+.is-docked #btn-max {
+  display: none;
+}
+.is-docked:not(.is-expanded) .strip,
+.is-docked:not(.is-expanded) #editor {
+  display: none;
+}
+.is-docked:not(.is-expanded) .dock-icon {
+  position: fixed;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  border: 0;
+  padding: 0;
+  background: var(--bg);
+  cursor: pointer;
+}
+.dock-icon svg {
+  width: 30px;
+  height: 30px;
+}
+.dock-icon:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -3px;
+}
+/* Open focus to-dos waiting: a small count, so the icon still tells you something. */
+.dock-badge {
+  position: absolute;
+  right: 4px;
+  top: 4px;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  border-radius: 8px;
+  background: var(--accent);
+  color: #fff;
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 16px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+.is-docked #btn-dock {
+  color: var(--accent-text);
+}
+
 /* Where a dragged line will land. */
 .drop-line {
   position: fixed;

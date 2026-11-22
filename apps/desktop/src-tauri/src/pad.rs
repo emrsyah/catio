@@ -14,6 +14,9 @@ fn window(app: &AppHandle) -> Option<WebviewWindow> {
 }
 
 pub fn toggle(app: &AppHandle) {
+    if crate::dock::is_docked() {
+        return crate::dock::toggle(app);
+    }
     let Some(w) = window(app) else { return };
     let visible = w.is_visible().unwrap_or(false);
     let focused = w.is_focused().unwrap_or(false);
@@ -25,6 +28,9 @@ pub fn toggle(app: &AppHandle) {
 }
 
 pub fn show(app: &AppHandle) {
+    if crate::dock::is_docked() {
+        return crate::dock::expand(app, true);
+    }
     let Some(w) = window(app) else { return };
     if !w.is_visible().unwrap_or(false) {
         remember_foreground();
@@ -37,6 +43,10 @@ pub fn show(app: &AppHandle) {
 }
 
 pub fn hide(app: &AppHandle) {
+    if crate::dock::is_docked() {
+        // In dock mode "hide" means shrink back to the corner icon.
+        return crate::dock::collapse(app);
+    }
     let Some(w) = window(app) else { return };
     // The app rarely exits cleanly (it dies at Windows shutdown), so persist position on every hide.
     use tauri_plugin_window_state::{AppHandleExt, StateFlags};
@@ -87,6 +97,14 @@ fn clamp_to_monitors(w: &WebviewWindow) {
             let _ = w.center();
         }
     }
+}
+
+pub fn remember_focus() {
+    remember_foreground();
+}
+
+pub fn restore_focus() {
+    restore_foreground();
 }
 
 #[cfg(windows)]

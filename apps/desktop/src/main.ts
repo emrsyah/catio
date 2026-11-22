@@ -182,6 +182,68 @@ async function chooseFolder() {
   }
 }
 
+// ---------- dock mode ----------
+
+const DOCK_KEY = "catio.dock";
+const COLLAPSE_DELAY_MS = 350;
+let docked = false;
+let expanded = false;
+let collapseTimer: number | undefined;
+
+function setDock(on: boolean) {
+  try {
+    localStorage.setItem(DOCK_KEY, on ? "1" : "0");
+  } catch {
+    /* mode still applies this session */
+  }
+  invoke("set_dock", { on }).catch(console.error);
+}
+
+/** Count of open focus to-dos, shown as a badge on the collapsed icon. */
+function updateDockBadge() {
+  const badge = document.getElementById("dock-badge")!;
+  const lines = view.state.doc.toString().split("\n");
+  const divider = lines.findIndex((l) => l.trim() === "---");
+  const open = divider > 0 ? lines.slice(0, divider).filter((l) => /^\s*\[ \]/.test(l)).length : 0;
+  badge.hidden = open === 0;
+  badge.textContent = String(open);
+}
+
+async function setupDock() {
+  const root = document.documentElement;
+  await listen<{ docked: boolean; expanded: boolean }>("dock-state", (e) => {
+    docked = e.payload.docked;
+    expanded = e.payload.expanded;
+    document.body.classList.toggle("is-docked", docked);
+    document.body.classList.toggle("is-expanded", expanded);
+    if (docked && !expanded) updateDockBadge();
+  });
+  await listen<boolean>("dock-request", (e) => setDock(e.payload));
+  document.getElementById("btn-dock")!.addEventListener("click", () => setDock(!docked));
+  document.getElementById("dock-icon")!.addEventListener("click", () => {
+    invoke("dock_expand", { focus: true }).catch(console.error);
+  });
+  // Hover opens a preview without stealing the keyboard; click inside to edit.
+  root.addEventListener("mouseenter", () => {
+    window.clearTimeout(collapseTimer);
+    if (docked && !expanded) invoke("dock_expand", { focus: false }).catch(console.error);
+  });
+  // Leaving shrinks it back, after a short grace so a wobble past the edge doesn't snap it shut.
+  root.addEventListener("mouseleave", () => {
+    if (!docked || !expanded || document.body.classList.contains("is-dragging")) return;
+    window.clearTimeout(collapseTimer);
+    collapseTimer = window.setTimeout(() => {
+      if (dirty) void save();
+      invoke("dock_collapse").catch(console.error);
+    }, COLLAPSE_DELAY_MS);
+  });
+  try {
+    if (localStorage.getItem(DOCK_KEY) === "1") setDock(true);
+  } catch {
+    /* default: floating pad */
+  }
+}
+
 // ---------- window ----------
 
 function hidePad() {
@@ -234,6 +296,7 @@ async function boot() {
   view.focus();
   wakeIfNewDay();
   scheduleReminders(view.state.doc.toString());
+  await setupDock();
   if (first_run) {
     setStatus(`disimpan di ${shortPath(path)}`, "quiet", 0, { label: "ganti", run: () => void chooseFolder() });
     statusClearsOnEdit = true; // stays until you start writing

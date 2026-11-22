@@ -1,4 +1,5 @@
 mod doc;
+mod dock;
 mod pad;
 mod reminders;
 
@@ -78,6 +79,27 @@ fn hide_pad(app: AppHandle) {
     pad::hide(&app);
 }
 
+/// Keeps the tray checkbox in sync when dock mode is toggled from the pad.
+struct DockMenu(CheckMenuItem<tauri::Wry>);
+
+#[tauri::command]
+fn set_dock(app: AppHandle, on: bool) {
+    dock::set_docked(&app, on);
+    if let Some(item) = app.try_state::<DockMenu>() {
+        let _ = item.0.set_checked(on);
+    }
+}
+
+#[tauri::command]
+fn dock_expand(app: AppHandle, focus: bool) {
+    dock::expand(&app, focus);
+}
+
+#[tauri::command]
+fn dock_collapse(app: AppHandle) {
+    dock::collapse(&app);
+}
+
 pub fn run() {
     tauri::Builder::default()
         // Must be first: a second launch just shows the existing pad.
@@ -141,7 +163,10 @@ pub fn run() {
             hide_pad,
             archive_lines,
             unarchive,
-            choose_folder
+            choose_folder,
+            set_dock,
+            dock_expand,
+            dock_collapse
         ])
         .run(tauri::generate_context!())
         .expect("error while running Catio");
@@ -166,6 +191,8 @@ fn register_hotkey(app: &AppHandle) {
 
 fn build_tray(app: &AppHandle) -> tauri::Result<()> {
     let show = MenuItem::with_id(app, "show", "Buka pad  (Ctrl+Alt+N)", true, None::<&str>)?;
+    let dock_item = CheckMenuItem::with_id(app, "dock", "Mode dock (pojok kanan bawah)", true, false, None::<&str>)?;
+    app.manage(DockMenu(dock_item.clone()));
     let protect = CheckMenuItem::with_id(app, "protect", "Sembunyiin dari share screen", true, !cfg!(debug_assertions), None::<&str>)?;
     let autostart_on = app.autolaunch().is_enabled().unwrap_or(false);
     let autostart = CheckMenuItem::with_id(app, "autostart", "Jalan waktu Windows nyala", true, autostart_on, None::<&str>)?;
@@ -174,7 +201,7 @@ fn build_tray(app: &AppHandle) -> tauri::Result<()> {
     let quit = MenuItem::with_id(app, "quit", "Keluar", true, None::<&str>)?;
     let sep = PredefinedMenuItem::separator(app)?;
     let sep2 = PredefinedMenuItem::separator(app)?;
-    let menu = Menu::with_items(app, &[&show, &sep, &protect, &autostart, &folder, &move_folder, &sep2, &quit])?;
+    let menu = Menu::with_items(app, &[&show, &dock_item, &sep, &protect, &autostart, &folder, &move_folder, &sep2, &quit])?;
 
     let protect_item = protect.clone();
     let autostart_item = autostart.clone();
@@ -184,6 +211,11 @@ fn build_tray(app: &AppHandle) -> tauri::Result<()> {
         .show_menu_on_left_click(false)
         .on_menu_event(move |app, event| match event.id.as_ref() {
             "show" => pad::show(app),
+            "dock" => {
+                // The webview persists the choice and calls set_dock, so both paths stay in sync.
+                let on = !dock::is_docked();
+                let _ = app.emit("dock-request", on);
+            }
             "protect" => {
                 let on = protect_item.is_checked().unwrap_or(true);
                 if let Some(w) = app.get_webview_window(pad::LABEL) {

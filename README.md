@@ -23,6 +23,10 @@ File-nya ada di `Documents\Catio\catio.md`. Bisa dibuka di Notepad kapan aja. Pe
 | `Esc` | Tutup pencarian → hapus seleksi → sembunyiin pad |
 | `[]` | Jadi checkbox `[ ] ` |
 | `Ctrl+Enter` | Centang / buka centang (teks biasa jadi to-do) |
+| `Ctrl+Shift+Enter` | Tunda sampai besok (`[>]`), atau balikin. Hover baris → "nanti" |
+| `Ctrl+Shift+Backspace` | Bersihin: yang selesai pindah ke `arsip.md` (ada "batal" 8 detik) |
+| Tarik titik-titik di kiri / checkbox | Pindahin baris. Drop di atas `---` = masuk fokus |
+| `F11` / double-click strip | Full screen |
 | `Enter` | Di to-do: lanjut to-do baru. Di to-do kosong: selesai list |
 | `Tab` / `Shift+Tab` | Indent / outdent |
 | `Alt+↑ / ↓` | Geser baris |
@@ -48,4 +52,8 @@ brand/                  konsep logo + icon sementara
 
 Udah ada: jendela selalu di atas tanpa taskbar, hotkey global, tray (buka, share-screen protection, autostart, buka folder, keluar), checkbox/fokus/bar "sekarang"/jam mono, simpan atomic + watcher, pengingat notifikasi, zoom, Esc berlapis, single instance, posisi diingat.
 
-Belum ada (sesuai roadmap): pilih folder lain (misal OneDrive, buat sinkron HP v0; sekarang selalu `Documents\Catio`), ganti hotkey dari UI, merge per baris kalau laptop & file berubah barengan (sekarang versi luar disimpan jadi `catio.conflict-*.md`), tombol "Tunda 5 mnt / Buka" di notifikasi, auto-sembunyi waktu ada app full screen, jam di gutter kanan (sekarang masih inline), Bersihin ke `arsip.md`, riwayat, sinkron HP.
+Mode dock: tombol ▣ di strip atau tray → pad ngecil jadi icon di pojok kanan bawah (badge = to-do fokus yang belum beres). Hover buat buka, klik buat ngetik, kursor keluar = ngecil lagi.
+
+Pindahin `catio.md` (misal ke OneDrive buat sinkron HP v0): tray → "Pindahin catio.md ke folder lain…".
+
+Belum ada: ganti hotkey dari UI, merge per baris kalau laptop & file berubah barengan (sekarang versi luar disimpan jadi `catio.conflict-*.md`), tombol "Tunda 5 mnt / Buka" di notifikasi, auto-sembunyi waktu ada app full screen, jam di gutter kanan (sekarang masih inline), Bersihin ke `arsip.md`, riwayat, sinkron HP.

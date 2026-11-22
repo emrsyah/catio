@@ -9,6 +9,9 @@
     <div class="strip" data-tauri-drag-region>
       <span class="status" id="status" role="status" aria-live="polite"></span>
       <div class="controls">
+        <button type="button" id="btn-dock" aria-label="Mode dock" title="Mode dock: ngecil ke pojok kanan bawah, buka pas di-hover">
+          <svg viewBox="0 0 12 12" width="12" height="12" aria-hidden="true"><rect x="1.5" y="1.5" width="9" height="9" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.2" /><rect x="6" y="6" width="3" height="3" rx="0.6" fill="currentColor" /></svg>
+        </button>
         <button type="button" id="btn-min" aria-label="Kecilin ke tray" title="Kecilin ke tray (Esc)">
           <svg viewBox="0 0 12 12" width="12" height="12" aria-hidden="true"><path d="M2.5 6h7" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" /></svg>
         </button>
@@ -21,6 +24,16 @@
       </div>
     </div>
     <main id="editor" aria-label="catio.md"></main>
+
+    <!-- Dock mode, collapsed: just the icon. Hover opens the pad, click focuses it. -->
+    <button type="button" class="dock-icon" id="dock-icon" aria-label="Buka pad">
+      <svg viewBox="0 0 1024 1024" aria-hidden="true">
+        <path d="M272 380 V772 a28 28 0 0 0 28 28 H640 L752 688 V380 Z" fill="var(--ink)" />
+        <path d="M272 392 V196 L392 300 H632 L752 196 V392 Z" fill="var(--accent)" />
+        <path d="M640 800 V716 a28 28 0 0 1 28 -28 H752 Z" fill="var(--accent)" />
+      </svg>
+      <span class="dock-badge" id="dock-badge" hidden></span>
+    </button>
 
     <!-- Undecorated window: these edges are the resize borders. -->
     <div class="rz rz-n" data-dir="North"></div>
