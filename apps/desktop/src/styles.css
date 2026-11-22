@@ -121,6 +121,53 @@ body {
   pointer-events: none;
   z-index: 20;
 }
+.drop-line::before {
+  content: "";
+  position: absolute;
+  left: -3px;
+  top: -2px;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+}
+
+/* Copy of the dragged line that follows the pointer. */
+.drag-ghost {
+  position: fixed;
+  z-index: 30;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  max-width: 240px;
+  padding: 4px 10px 4px 8px;
+  border-radius: 8px;
+  background: var(--bg);
+  color: var(--ink);
+  font-size: var(--fs);
+  font-weight: 500;
+  line-height: 1.5;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  pointer-events: none;
+  box-shadow:
+    0 0 0 1px var(--line),
+    0 6px 16px rgb(0 0 0 / 0.14),
+    0 1px 3px rgb(0 0 0 / 0.08);
+}
+.drag-ghost-box {
+  flex: none;
+  width: 12px;
+  height: 12px;
+  border: 1.5px solid var(--box);
+  border-radius: 3px;
+}
+.drag-ghost-box.is-done {
+  background: var(--ink-3);
+  border-color: var(--ink-3);
+}
+
 .is-dragging,
 .is-dragging * {
   cursor: grabbing !important;
@@ -269,6 +316,12 @@ body {
 }
 .cm-box-snooze .cm-check {
   border-radius: 50%;
+}
+
+/* The line being dragged stays in place, tinted, so you can see what left where. */
+.cm-drag-source {
+  background-color: var(--accent-soft);
+  color: var(--ink-2);
 }
 
 .cm-done,

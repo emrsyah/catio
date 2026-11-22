@@ -1,7 +1,7 @@
 // CodeMirror 6 setup. The document is plain text; everything here is view-only decoration,
 // so copy/paste and the file on disk stay exactly what the user typed.
 
-import { EditorSelection, EditorState, Extension, Range } from "@codemirror/state";
+import { EditorSelection, EditorState, Extension, Range, StateEffect, StateField } from "@codemirror/state";
 import {
   Decoration,
   DecorationSet,
@@ -179,6 +179,40 @@ const decorations = ViewPlugin.fromClass(
 const GUTTER = 44; // keep in sync with --gutter in styles.css
 const DRAG_THRESHOLD = 4;
 
+/** Highlights the line being dragged. A state field so re-renders keep the highlight. */
+const setDragSource = StateEffect.define<number | null>();
+const dragSource = StateField.define<DecorationSet>({
+  create: () => Decoration.none,
+  update(value, tr) {
+    value = value.map(tr.changes);
+    for (const e of tr.effects) {
+      if (!e.is(setDragSource)) continue;
+      value =
+        e.value === null
+          ? Decoration.none
+          : Decoration.set([Decoration.line({ class: "cm-drag-source" }).range(tr.state.doc.line(e.value).from)]);
+    }
+    return value;
+  },
+  provide: (f) => EditorView.decorations.from(f),
+});
+
+/** A small copy of the line that follows the pointer, so it's clear what is being moved. */
+function makeGhost(view: EditorView, lineNo: number): HTMLElement {
+  const text = view.state.doc.line(lineNo).text;
+  const p = parseLine(text);
+  const ghost = document.createElement("div");
+  ghost.className = "drag-ghost";
+  if (p.markerFrom >= 0) {
+    const box = document.createElement("span");
+    box.className = `drag-ghost-box${p.kind === "done" ? " is-done" : ""}`;
+    ghost.appendChild(box);
+  }
+  ghost.append(text.slice(p.bodyFrom).trim() || " ");
+  document.body.appendChild(ghost);
+  return ghost;
+}
+
 /**
  * Press on a checkbox or the left gutter, then drag: the line moves where the orange
  * drop line is. A press without movement is a plain click (toggle / place caret).
@@ -186,6 +220,7 @@ const DRAG_THRESHOLD = 4;
  */
 function startLineDrag(view: EditorView, source: number, down: MouseEvent, onClick: () => void) {
   const indicator = document.getElementById("drop-line") as HTMLElement | null;
+  let ghost: HTMLElement | null = null;
   let dragging = false;
   let insertBefore = source;
 
@@ -203,6 +238,12 @@ function startLineDrag(view: EditorView, source: number, down: MouseEvent, onCli
       if (Math.abs(e.clientY - down.clientY) + Math.abs(e.clientX - down.clientX) < DRAG_THRESHOLD) return;
       dragging = true;
       document.body.classList.add("is-dragging");
+      view.dispatch({ effects: setDragSource.of(source) });
+      ghost = makeGhost(view, source);
+    }
+    if (ghost) {
+      ghost.style.left = `${e.clientX + 14}px`;
+      ghost.style.top = `${e.clientY - 14}px`;
     }
     // Nudge the scroller when dragging near its edges.
     const r = view.scrollDOM.getBoundingClientRect();
@@ -225,7 +266,9 @@ function startLineDrag(view: EditorView, source: number, down: MouseEvent, onCli
     window.removeEventListener("mouseup", up);
     document.body.classList.remove("is-dragging");
     if (indicator) indicator.hidden = true;
+    ghost?.remove();
     if (!dragging) return onClick();
+    view.dispatch({ effects: setDragSource.of(null) });
     moveLine(view, source, insertBefore);
   };
 
@@ -405,6 +448,7 @@ export function createEditor(parent: HTMLElement, doc: string, hooks: EditorHook
     placeholder("tulis apa aja. [] buat to-do, --- buat batas fokus"),
     lineStartInput,
     decorations,
+    dragSource,
     zoomHandlers,
     catioKeymap,
     keymap.of([...searchKeymap, ...historyKeymap, ...defaultKeymap]),

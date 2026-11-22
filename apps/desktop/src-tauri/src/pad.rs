@@ -43,6 +43,25 @@ pub fn hide(app: &AppHandle) {
     let _ = app.save_window_state(StateFlags::all() & !StateFlags::VISIBLE);
     let _ = w.hide();
     restore_foreground();
+    hint_once(app);
+}
+
+/// The pad has no taskbar button, so the first hide says where it went. Once per install.
+fn hint_once(app: &AppHandle) {
+    use tauri_plugin_notification::NotificationExt;
+    let Ok(dir) = app.path().app_data_dir() else { return };
+    let marker = dir.join("hide-hint-shown");
+    if marker.exists() {
+        return;
+    }
+    let _ = std::fs::create_dir_all(&dir);
+    let _ = std::fs::write(&marker, b"");
+    let _ = app
+        .notification()
+        .builder()
+        .title("Pad masih jalan di tray")
+        .body("Ctrl+Alt+N buat munculin lagi. Icon-nya ada di tray dekat jam.")
+        .show();
 }
 
 /// An external monitor may have been unplugged since last time: never show off-screen.
