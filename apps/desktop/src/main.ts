@@ -152,6 +152,7 @@ async function onExternalChange(text: string) {
   }
   replaceDoc(view, text, { annotations: external.of(true) });
   scheduleReminders(text);
+  if (docked) updateDockBadge(); // edited in Notepad / on the phone while collapsed
 }
 
 // ---------- Bersihin ----------
@@ -269,14 +270,19 @@ function setDock(on: boolean) {
   invoke("set_dock", { on }).catch(console.error);
 }
 
-/** Count of open focus to-dos, shown as a badge on the collapsed icon. */
+/** Every open to-do in the file (snoozed ones wait for tomorrow and don't count),
+ *  shown as a badge on the collapsed icon. Empty "[ ]" lines don't count either. */
 function updateDockBadge() {
   const badge = document.getElementById("dock-badge")!;
-  const lines = view.state.doc.toString().split("\n");
-  const divider = lines.findIndex((l) => l.trim() === "---");
-  const open = divider > 0 ? lines.slice(0, divider).filter((l) => /^\s*\[ \]/.test(l)).length : 0;
+  const open = view.state.doc
+    .toString()
+    .split("\n")
+    .filter((l) => /^\s*\[ \]\s*\S/.test(l)).length;
   badge.hidden = open === 0;
-  badge.textContent = String(open);
+  badge.textContent = open > 99 ? "99+" : String(open);
+  const label = `${open} to-do belum beres`;
+  document.getElementById("dock-icon")!.setAttribute("aria-label", `Buka pad, ${label}`);
+  badge.title = label;
 }
 
 async function setupDock() {
